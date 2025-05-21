@@ -1,0 +1,70 @@
+# File di configurazione dell'IDE
+.idea/
+*.iml
+
+# File di cache/intermedi Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# File temporanei o di backup
+*.swp
+*.bak
+*~
+
+# File compilati C/C++ o estensioni
+*.so
+*.dll
+*.out
+*.exe
+
+# File binari o output scientifici
+*.npy
+*.npz
+*.mat
+*.vtk
+*.vtu
+*.stl
+*.msh
+*.pvd
+*.xdmf
+*.h5
+*.vtp
+*.flow
+*.dat
+
+
+# File video o immagini grandi
+*.mp4
+*.avi
+*.mov
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+
+# Log, dati di test o debug
+*.log
+*.tmp
+*.dump
+*.node
+*.face
+
+# Output di simulazione o mesh intermedi
+output_volume_meshes/
+output_surface_meshes/
+simulation_results/
+temporary_data/
+*.svpre
+*.svsolver
+
+# Ambiente virtuale
+venv/
+.env/
+.envrc
+
+# File di configurazione locali
+config_local.yaml
+secrets.json
