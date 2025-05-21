@@ -13,7 +13,7 @@ import gmsh
 from scipy.spatial import cKDTree
 import tetgen
 from funzioni import mmg_remesh
-from test3 import outlet_nodes
+
 
 # === 1. CARICAMENTO DELLA MESH ===
 
@@ -144,7 +144,7 @@ for i in range(matrix2.shape[0]):
 
 # Fourier interpolation
 #matrixFourier = np.zeros((matrix2.shape[0], 3, new_time_frames))
-[matrixFourier,timeFourier,fas] = fourier(matrixPchip, time2, 0)
+[matrixFourier, derivFourier,timeFourier,fas] = fourier(matrixPchip, time2, 0)
 v_cyl = volume(matrixFourier, T_cyl)
 # timeplot(matrixFourier,T_cyl)
 
@@ -183,13 +183,13 @@ _,_,_ = get_bounds("surf_mesh.vtp") # ("cyl.stl")
 # mesh.save("disp_mesh.vtp")
 
 
-flow_rate = np.gradient(v_cyl, timeFourier.flatten())  # Automatically handles variable time steps N.B. 1 mm3/ms = 1 cm3/s
+flow_rate = np.gradient(v_cyl, timeFourier.flatten()/1000)  # Automatically handles variable time steps N.B. 1 mm3/ms = 1 cm3/s
 
 # Save to .flow file
 with open("cyl.flow", "w") as f:
-    for t, q in zip(timeFourier.flatten(), flow_rate):
+    for t, q in zip(timeFourier.flatten()/1000, flow_rate):
         # Convert q to a scalar and write to file
-        f.write(f"{t:.7f}\t{q:.7f}\n")
+        f.write(f"{t:.7f} {q:.7f}\n")
 
 wall = pv.read("wall.vtp")
 inlet = pv.read("inlet.vtp")
@@ -206,10 +206,61 @@ points = inlet.points
 node_ids = inlet.point_data["GlobalNodeID"]
 normals = np.array(inlet.point_normals)
 
+v3 = np.load("v3.npy")
+
 # === Tempo e portata ===
-# v_cyl = volume(v3, T_cyl)
-flow_rate = np.gradient(v_cyl, timeFourier.flatten())
-time = timeFourier.flatten()
+v_cyl = volume(v3, T_cyl)
+
+# # Create the plot
+# plt.figure()
+# plt.plot(timeFourier, v_cyl, label='volume')
+# plt.legend()
+# plt.grid(True)
+# plt.xlabel('Time [ms]')
+# plt.ylabel('Volume [mm^3]')
+# plt.title('Volume Over Time')
+# plt.show()
+
+def fourier_derivative(signal, time):
+    dt = time[1] - time[0]
+    N = len(signal)
+    freqs = np.fft.fftfreq(N, d=dt)
+
+    F = np.fft.fft(signal)
+    F_deriv = 1j * 2 * np.pi * freqs * F
+    deriv = np.fft.ifft(F_deriv)
+
+    return np.real(deriv)
+
+def write_flow_file(filename, time, flow):
+    with open(filename, 'w') as f:
+        for t, q in zip(time, flow):
+            f.write(f"{t:.6f} {q:.6f}\n")
+
+# 2. Derivata via Fourier
+flow_rate_f = fourier_derivative(v_cyl, timeFourier.flatten()/1000)
+
+# 3. Salva in file .flow
+write_flow_file("inlet.flow", timeFourier.flatten()/1000, flow_rate)
+
+
+
+flow_rate = np.gradient(v_cyl, timeFourier.flatten()/1000)
+
+# Create the plot
+plt.figure()
+plt.plot(timeFourier, flow_rate, label='flow_rate')
+plt.plot(timeFourier, v_cyl, label='volume')
+plt.plot(timeFourier, flow_rate_f, label='flow_rate_f')
+plt.legend()
+plt.grid(True)
+plt.xlabel('Time [ms]')
+plt.ylabel('Volume [mm^3]')
+plt.title('Volume Over Time')
+plt.show()
+
+
+time = timeFourier.flatten()/1000  # Convert to seconds
 nl = len(time)
 
 # === Calcolo area ===
@@ -320,9 +371,9 @@ v3 = np.load("v3.npy")
 # Calculate the displacement
 displacement = v3 - v3[:,:,0][:, :, np.newaxis]
 
-write_motion(displacement, timeFourier, wall, surf)
-write_motion(displacement, timeFourier, inlet, surf)
-write_motion(displacement, timeFourier, outlet, surf)
+write_motion(displacement, timeFourier, wall, surf, "wall")
+write_motion(displacement, timeFourier, inlet, surf, "inlet")
+write_motion(displacement, timeFourier, outlet, surf, "outlet")
 
 '''
 N_nodes = wall.n_points

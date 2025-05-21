@@ -271,7 +271,7 @@ def get_bounds(nome_file):
     print('Done')
     return mesh_inflow_poly, mesh_outflow_poly, mesh_walls_poly
 
-def write_motion(displacement, time, face, surf):
+def write_motion(displacement, time, face, surf, name):
     N_nodes = face.n_points
     N_frames = time.shape[0]
     N_vectors = displacement.shape[1]
@@ -287,7 +287,8 @@ def write_motion(displacement, time, face, surf):
             raise ValueError(f"L'ID {vertex_id} non è presente.")
         return displacement[index, :, :]  # restituisce una matrice 3xT (x,y,z nel tempo)
 
-    with open(f"{face}.dat", "w") as f:
+    # face_id = face.cell_data["ModelFaceID"][0]
+    with open(f"{name}_displacement.dat", "w") as f:
         # Riga 1: numero nodi e numero frame
         f.write(f"{N_vectors} {N_frames} {N_nodes}\n")
 
@@ -309,6 +310,6 @@ def write_motion(displacement, time, face, surf):
                 # z_disp = z + dz
                 f.write(f"{dx:.6e} {dy:.6e} {dz:.6e}\n")
 
-    print(f"Displacement saved to {face}.dat")
+    print(f"Displacement saved to {name}_displacement.dat")
     return
 

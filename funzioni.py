@@ -90,8 +90,10 @@ def fourier(matrix2, time, num_intermedie):
 
     # Pre-allocazione per la nuova matrice
     new_matrix = np.zeros((matrix2.shape[0], matrix2.shape[1], num_frames_interpolati))
+    new_matrix_deriv = np.zeros_like(new_matrix)
     new_time = np.linspace(time[0], time[-1], num_frames_interpolati)  # Nuova timeline uniforme
     nt = (len(new_time) - matrix2.shape[2]) // 2
+    dt = new_time[1] - new_time[0]
 
     # Ciclo per interpolare armonicamente ogni punto della mesh
     for i in range(matrix2.shape[0]):  # Per ogni nodo
@@ -107,10 +109,18 @@ def fourier(matrix2, time, num_intermedie):
             k = np.fft.ifft(F) * len(F) / len(signal)
             new_matrix[i, j, :] = np.real(k)
 
+            # Frequenze corrispondenti per la derivata
+            freqs = np.fft.fftfreq(len(F), d=dt)
+
+            # Calcolo derivata nel dominio di Fourier
+            F_deriv = 1j * 2 * np.pi * freqs * F
+            deriv = np.fft.ifft(F_deriv) * len(F) / len(signal)
+            new_matrix_deriv[i, j, :] = np.real(deriv)
+
     fasi = num_frames_interpolati
     print('Done.')
 
-    return new_matrix, new_time, fasi
+    return new_matrix, new_matrix_deriv, new_time, fasi
 
 
 from scipy.spatial import distance
