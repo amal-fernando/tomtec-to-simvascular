@@ -2,8 +2,7 @@ import numpy as np
 import scipy.spatial as spatial
 import scipy.interpolate as interp
 import meshio  # per leggere/scrivere mesh
-from funzioni import timeplot, volume, resample_u, riordina, fourier
-from test import get_bounds, write_motion
+from funzioni import timeplot, volume, resample_u, riordina, fourier, get_bounds, write_motion
 import os
 import matplotlib.pyplot as plt
 from scipy.interpolate import PchipInterpolator
@@ -24,7 +23,7 @@ ed = 942.905
 mesh_cyl = meshio.read("cylinder_surface.stl")
 T= len(time)  # Numero di frame temporali
 
-# P_orig = mesh_orig.points  # Coordinate dei nodi originali (N1 x 3)
+# P_orig = mesh_orig.points # Coordinate dei nodi originali (N1 x 3)
 P_cyl = mesh_cyl.points  # Coordinate dei nodi del cilindro (N2 x 3)
 T_cyl = mesh_cyl.cells_dict["triangle"]  # Triangoli del cilindro (M x 3)
 
@@ -157,16 +156,35 @@ points = mesh.points
 faces = mesh.faces.reshape((-1, 4))[:, 1:]  # Drop the leading 3s
 
 # TetGen options (preserve surface, good quality)
-tetgen_options = "pq1.2a0.005"
+tetgen_options = "pq1.2a0.333"
 
-tet = tetgen.TetGen(points, faces)
-tet.tetrahedralize(order=1, switches="pq1.2")
+tet = tetgen.TetGen(mesh)
+tet.tetrahedralize(order=1, switches=tetgen_options) # "pq1.2a0.333" or tet.tetrahedralize(order=1, switches=tetgen_options)
 
 # Convert to PyVista mesh
-tetra_mesh = tet.grid
+grid = tet.grid
+
+# grid.plot(show_edges=True)
+
+# get cell centroids
+cells = grid.cells.reshape(-1, 5)[:, 1:]
+cell_center = grid.points[cells].mean(1)
+
+# extract cells below the 0 xy plane
+mask = cell_center[:, 2] < 0
+cell_ind = mask.nonzero()[0]
+subgrid = grid.extract_cells(cell_ind)
+
+# advanced plotting
+plotter = pv.Plotter()
+plotter.add_mesh(subgrid, 'lightgrey', lighting=True, show_edges=True)
+plotter.add_mesh(mesh, 'r', 'wireframe')
+plotter.add_legend([[' Input Mesh ', 'r'],
+                    [' Tessellated Mesh ', 'black']])
+plotter.show()
 
 # Save as VTU
-tetra_mesh.save("mesh-complete.mesh.vtu")
+grid.save("mesh-complete.mesh.vtu")
 
 mesh_volume = pv.read("mesh-complete.mesh.vtu")
 mesh_volume.point_data["GlobalNodeID"] = np.arange(mesh_volume.points.shape[0]) + 1
