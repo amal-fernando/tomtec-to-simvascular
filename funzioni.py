@@ -531,7 +531,8 @@ def resample_u(vr,tr,ur,p):
     return pp, upp
 
 
-def normalplot(v,f,i):
+def normalplot(v,f,i, save_path=None, show=True):
+    """  Plots the normal vectors to a mesh at a specific frame. """
     print('Plotting the normal vectors to the mesh')
     # Create a PyVista mesh
     mesh = pv.PolyData(v[:, :, i], np.hstack([np.full((f.shape[0], 1), 3), f]))
@@ -551,7 +552,18 @@ def normalplot(v,f,i):
     plotter.add_arrows(centers, mesh.cell_normals, mag=arrow_length, color='red', opacity=0.3)
     plotter.camera_position = 'iso'  # Set isometric view
     plotter.add_text(f'Normal vectors of the {i}-th frame', font_size=14, shadow=True, position='upper_edge')
-    plotter.show()
+
+    # Save the 3D mesh if a save path is provided
+    if save_path is not None:
+        plotter.export_obj(save_path)
+        print(f'Mesh saved to {save_path}')
+
+    # Show the plot if requested
+    if show:
+        plotter.show()
+    else:
+        plotter.close()  # Close the plotter if not showing
+
 
 import os
 import subprocess
@@ -850,7 +862,7 @@ def get_bounds(mesh):
             # print(f"Region {region_id}: Area = {region_area}, Perimeter = {perimeter}")
 
             circularity = 4 * np.pi * region_area / (perimeter ** 2)
-            print(f"Region {region_id} circularity score: {circularity:.3f}")
+            # print(f"Region {region_id} circularity score: {circularity:.3f}")
 
             if 0.9 < circularity < 1.1:  # Circular region
                 if inflow_region is None:
@@ -988,7 +1000,7 @@ def get_bounds(mesh):
     plotter.add_mesh(mesh_walls, color='green', show_edges=True, opacity=0.7)
     # plotter.add_mesh(mesh,color='green', show_edges=True, opacity=0.7)
     plotter.add_axes()
-    plotter.show()
+    plotter.close()
 
     print('Done')
     return mesh_inflow_poly, mesh_outflow_poly, mesh_walls_poly, mesh

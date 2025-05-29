@@ -33,6 +33,11 @@ __pycache__/
 *.vtp
 *.flow
 *.dat
+*.obj
+*.mtl
+*.glb
+*.inp
+
 
 
 # File video o immagini grandi

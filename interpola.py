@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog
 import numpy as np
-from funzioni import riordina, timeplot, resample_u, pv_to_np, np_to_pv
+from funzioni import riordina, timeplot, resample_u, pv_to_np, np_to_pv, write_motion
 from funzioni import volume, normalplot, mmg_remesh, mesh_quality, get_bounds
 from funzioni import fourier
 import matplotlib
@@ -147,7 +147,8 @@ print("Loading Done")
 # np.save('time.npy', t0) # Save the time vector
 
 # timeplot(v0,f0) # plot della mesh rada nel tempo \decommentare
-# normalplot(v0, f0, 1) # plot delle normali alla mesh rada \decommentare
+normalplot(v0, f0, 1, os.path.join(radice_dataset[:-1], "plots", "normalplot_coarse.obj"), show=False) # plot delle normali alla mesh rada \decommentare
+
 
 #============================================================
 # 4. Reorder and extend the time vector and the displacements
@@ -212,7 +213,7 @@ if flag:
     remesh = remesh.triangulate() # Ensure the remeshed mesh is triangulated
     vert, fac = pv_to_np(remesh)  # Convert remeshed mesh to numpy arrays
     vert = vert[:, :, np.newaxis]
-    normalplot(vert, fac, 0)  # Plot the normals of the remeshed mesh
+    normalplot(vert, fac, 0, os.path.join(radice_dataset[:-1], "plots", "normalplot_fine.obj"), show=False)  # Plot the normals of the remeshed mesh
 else:
     remesh = mesh.triangulate() # Ensure the mesh is triangulated
 
@@ -252,7 +253,9 @@ plotter.add_mesh(subgrid, 'lightgrey', lighting=True, show_edges=True)
 plotter.add_mesh(remesh, 'r', 'wireframe')
 plotter.add_legend([[' Input Mesh ', 'r'],
                     [' Tessellated Mesh ', 'black']])
-plotter.show()
+# plotter.export_gltf(os.path.join(radice_dataset[:-1], "plots", "volume.glb"))
+# plotter.save_graphic(os.path.join(radice_dataset[:-1], "plots", "volume.pdf"))
+plotter.close() # plotter.show() # Show the plotter window
 
 # Save as VTU
 grid.point_data["GlobalNodeID"] = np.arange(grid.points.shape[0]) + 1
@@ -297,16 +300,16 @@ for i in range(v2.shape[2] - 1):
     p = upp + pp
     v3[:, :, i + 1] = p
 
-timeplot(v3,f1)
+# timeplot(v3,f1)
 #===========================================================
-# 5. Interpolation of the data to create intermediate frames
+# 8. Interpolation of the data to create intermediate frames
 #===========================================================
 
 num_intermedie = 4  # Number of intermediate frames to insert between each original frame
 frames_3  = frames_2 + (frames_2- 1) * num_intermedie
 
 # Initialize v4 with the appropriate dimensions
-v4 = np.zeros((v2.shape[0], v2.shape[1], frames_3))
+v4 = np.zeros((v3.shape[0], v3.shape[1], frames_3))
 v_cubic = np.zeros(v4.shape)  # For cubic interpolation
 v_linear = np.zeros(v4.shape)  # For linear interpolation
 v_pchip = np.zeros(v4.shape)  # For PCHIP interpolation
@@ -315,23 +318,23 @@ v_pchip = np.zeros(v4.shape)  # For PCHIP interpolation
 t3 = np.linspace(t2[0], t2[-1], frames_3)
 
 # Cubic interpolation
-for i in range(v2.shape[0]):  # For each node
+for i in range(v3.shape[0]):  # For each node
     for dim in range(3):  # For each spatial dimension (x, y, z)
-        coordinates = v2[i, dim, :] # Extract the coordinates in the current dimension
-        spline = CubicSpline(t2, coordinates, bc_type='periodic') # Create an interpolator for the current node and dimension
+        coordinates = v3[i, dim, :] # Extract the coordinates in the current dimension
+        spline = CubicSpline(t2, coordinates) # Create an interpolator for the current node and dimension
         v_cubic[i, dim, :] = spline(t3) # Interpolate to the new time points
 
 # Linear interpolation
-for i in range(v2.shape[0]):  # For each node
+for i in range(v3.shape[0]):  # For each node
     for dim in range(3):  # For each spatial dimension (x, y, z)
-        coordinates = v2[i, dim, :]
+        coordinates = v3[i, dim, :]
         linear_interp = interp1d(t2, coordinates, kind='linear')
         v_linear[i, dim, :] = linear_interp(t3)
 
 # PCHIP interpolation
-for i in range(v2.shape[0]):
+for i in range(v3.shape[0]):
     for dim in range(3):
-        coordinates = v2[i, dim, :]
+        coordinates = v3[i, dim, :]
         pchip_interp = PchipInterpolator(t2, coordinates)
         v_pchip[i, dim, :] = pchip_interp(t3)
 
@@ -339,21 +342,322 @@ for i in range(v2.shape[0]):
 v_fourier = fourier(v_pchip, t2, 0)
 
 # Create the plot for the original and interpolated volumes
-plt.figure()
-plt.plot(t2,volume(v2,f0), '*', label='volOriginal')
-plt.plot(t3,volume(v_cubic, f0), label='volCubic')
-plt.plot(t3,volume(v_linear, f0), label='volLinear')
-plt.plot(t3,volume(v_pchip, f0), label='volPchip')
-plt.plot(t3,volume(v_fourier, f0), label='volFourier')
-plt.legend()
-plt.grid(True)
-plt.xlabel('Time Frame')
-plt.ylabel('Volume')
-plt.title('Volume Over Time')
-plt.show()
+# plt.figure()
+# plt.plot(t2,volume(v3,f1), '*', label='volOriginal')
+# plt.plot(t3,volume(v_cubic, f1), label='volCubic')
+# plt.plot(t3,volume(v_linear, f1), label='volLinear')
+# plt.plot(t3,volume(v_pchip, f1), label='volPchip')
+# plt.plot(t3,volume(v_fourier, f1), label='volFourier')
+# plt.legend()
+# plt.grid(True)
+# plt.xlabel('Time Frame')
+# plt.ylabel('Volume')
+# plt.title('Volume Over Time')
+# plt.savefig(os.path.join(radice_dataset[:-1], "plots", "volume_interpolation.png"))
+# plt.show()
 
 v4 = v_fourier  # Use the Fourier interpolated data for further processing
 # normalplot(v4, f1, 1)  # Plot the normals of the interpolated mesh
 
+#==========================================================
+# 9. Generate the input files for the simulation
+#==========================================================
+V = volume(v4, f1)  # Calculate the volume for the Fourier interpolated data
+# Create a time vector for the new frames
+time = t3.flatten()/1000
+flow_rate = np.gradient(V, time)  # Automatically handles variable time steps N.B. 1 mm3/ms = 1 cm3/s
+
+# Save to .flow file
+with open(os.path.join(radice_dataset[:-1], "inlet.flow"), "w") as f:
+    f.write(f"{len(t3.flatten())} {inlet.n_points}\n")  # Write number of time steps and nodes
+    for t, q in zip(t3.flatten()/1000, flow_rate):
+        # Convert q to a scalar and write to file
+        f.write(f"{t:.7f} {q:.7f}\n")
+
+
+# Calculate the displacement
+displacement = v4 - v4[:,:,0][:, :, np.newaxis]
+
+write_motion(displacement, t3, wall, surface, os.path.join(radice_dataset[:-1], "wall" ))
+write_motion(displacement, t3, inlet, surface, os.path.join(radice_dataset[:-1], "inlet"))
+write_motion(displacement, t3, outlet, surface, os.path.join(radice_dataset[:-1], "outlet"))
+
+
+''' Genero file bct.vtp per 'inlet' '''
+
+# === Caricamento dati ===
+inlet = pv.read(os.path.join(radice_dataset[:-1], "mesh", "mesh-surfaces", "inlet.vtp"))
+points = inlet.points
+node_ids = inlet.point_data["GlobalNodeID"]
+normals = np.array(inlet.point_normals)
+
+
+time = t3.flatten()/1000  # Convert to seconds
+nl = len(time)
+
+# === Calcolo area ===
+mesh = pv.PolyData(points)
+tri = mesh.delaunay_2d()
+area = tri.area
+
+# === Centroide dell'inlet ===
+centroid = points.mean(axis=0)
+
+# === Raggio massimo (per profilo parabolico) ===
+radii = np.linalg.norm(points[:, :2] - centroid[:2], axis=1)
+r_max = radii.max()
+
+
+# === Lista di tutte le matrici di velocità ===
+velocità = []  # contiene velocity_0.0000, velocity_0.0001, ...
+
+'''
+# === Preparazione file ===
+lines = [f"{len(points)} {nl}"]
+
+for i, pt in enumerate(points):
+    x, y, z = pt
+    nn = int(node_ids[i])
+    normal = normals[i]
+
+    # Distanza radiale dal centroide nel piano (x, y)
+    r = np.linalg.norm(pt[:2] - centroid[:2])
+    shape_factor = 1 - (r / r_max) ** 2  # parabola
+
+    lines.append(f"{x:.6f} {y:.6f} {z:.6f} {nl} {nn}")
+    for j in range(nl):
+        Q = flow_rate[j]
+        v_mean = Q / area
+        v_mag = 2 * v_mean * shape_factor  # parabola: vmax = 2 * v_mean
+        vx, vy, vz = normal * v_mag
+        t = time[j]
+        lines.append(f"{vx:.6f} {vy:.6f} {vz:.6f} {t:.6f}")
+'''
+
+# === Ciclo sui tempi per costruire le matrici ===
+for j in range(nl):
+    Q = flow_rate[j]
+    v_mean = Q / area
+    t = time[j]
+
+    # Matrice velocità per questo istante: N righe, 3 colonne (vx, vy, vz)
+    velocity_matrix = []
+
+    for i, pt in enumerate(points):
+        r = np.linalg.norm(pt[:2] - centroid[:2])
+        shape_factor = 1 - (r / r_max) ** 2  # profilo parabolico
+        v_mag = 2 * v_mean * shape_factor
+        vx, vy, vz = normals[i] * v_mag
+        velocity_matrix.append([vx, vy, vz])
+
+    velocity_matrix = np.array(velocity_matrix)
+
+    # Aggiunge il campo al file mesh
+    field_name = f"velocity_{t/1000:.4f}"
+    inlet.point_data[field_name] = velocity_matrix * -1
+
+    # # Crea una variabile dinamica: es. velocity_0.0002
+    # var_name = f"velocity_{t:.4f}"
+    # globals()[var_name] = velocity_matrix
+    #
+    # # Aggiungi alla lista globale
+    # velocità.append(velocity_matrix)
+
+# === Salvataggio in file VTP ===
+inlet.save(os.path.join(radice_dataset[:-1], "bct.vtp"))
+
+
+print("Done!")
+
+# Generate the .inp file for the simulation
+
+config_text = f"""\
+#----------------------------------------------------------------
+# General simulation parameters
+
+Continue previous simulation: 0
+Number of spatial dimensions: 3
+Number of time steps: 3076
+Time step size: 0.001
+Spectral radius of infinite time step: 0.50
+Searched file name to trigger stop: STOP_SIM
+
+#Save results in folder: {radice_dataset[:-1]} 
+Save results to VTK format: 1
+Name prefix of saved VTK files: result
+Increment in saving VTK files: 40
+Start saving after time step: 1
+Increment in saving restart files: 50
+Convert BIN to VTK format: 0
+
+Simulation requires remeshing: F
+
+Verbose: 1
+Warning: 0
+Debug: 0
+
+#----------------------------------------------------------------
+# Mesh & Domains
+
+Add mesh: lumen {{
+   Mesh file path: /global-scratch/bulk_pool/afernando/Docker/{radice_dataset[:-1]}/mesh/mesh-complete.mesh.vtu
+   Add face: lumen_wall {{
+      Face file path: /global-scratch/bulk_pool/afernando/Docker/{radice_dataset[:-1]}/mesh/mesh-surfaces/wall.vtp
+   }}
+   Add face: lumen_inlet {{
+      Face file path: /global-scratch/bulk_pool/afernando/Docker/{radice_dataset[:-1]}/mesh/mesh-surfaces/inlet.vtp
+   }}
+   Add face: lumen_outlet {{
+      Face file path: /global-scratch/bulk_pool/afernando/Docker/{radice_dataset[:-1]}/mesh/mesh-surfaces/outlet.vtp
+   }}
+   Domain: 1
+}}
+
+#----------------------------------------------------------------
+# Equations
+
+Add equation: FSI {{
+   Coupled: 1
+   Min iterations: 3
+   Max iterations: 20
+   Tolerance: 1e-3
+   
+   #Remesher: Tetgen {{
+   #   Max edge size: lumen {{ val: 2. }}
+   #   Min dihedral angle: 10
+   #   Max radius ratio: 1.3
+   #   Remesh frequency: 50
+   #   Frequency for copying data: 1
+   #}}
+
+
+   Domain: 1 {{
+      Equation: fluid
+      Density: 0.00106
+      Viscosity: Constant {{Value: 0.004}}
+      Backflow stabilization coefficient: 0.2
+   }}
+
+   Domain: 2 {{
+      Equation: struct
+      Constitutive model: stVK
+      Density: 1
+      Elasticity modulus: 100000
+      Poisson ratio: 0.4
+   }}
+
+   Output: Spatial {{
+      Displacement: f
+      Velocity: t
+      Pressure: t
+      WSS: t
+      Vorticity: t
+      Absolute_velocity: t
+   }}
+
+   Output: Alias {{
+      Displacement: FS_Displacement
+   }}
+
+   LS type: GMRES {{
+      Preconditioner: FSILS
+      Max iterations: 100
+      Tolerance: 1e-4
+      Absolute tolerance: 1e-4
+      Krylov space dimension: 100
+   }}
+
+   #Initialize RCR from flow: t
+   #Add BC: lumen_inlet {{
+      #Type: Dir
+      #Time dependence: Unsteady
+      #Temporal values file path: /global-scratch/bulk_pool/afernando/Docker/{radice_dataset[:-1]}/inlet.flow
+      #Profile: Parabolic
+      #Impose flux: 1
+      #Time dependence: General
+      ##BCT file path: /global-scratch/bulk_pool/afernando/Docker/Tubo/bct.vtp
+   #}}
+   
+   Add BC: lumen_inlet {{
+      Type: Dirichlet 
+      Time dependence: General
+      Temporal and spatial values file path: /global-scratch/bulk_pool/afernando/Docker/{radice_dataset[:-1]}/inlet_displacement.dat
+      Profile: Flat
+      Zero out perimeter: 0
+      Impose flux: 0
+      Impose on state variable integral: 1
+   }}
+   
+   Add BC: lumen_outlet {{
+      Type: Neu
+      Time dependence: RCR
+      RCR values: "0.010299941677760955, 1.5940597148021995, 1.182852092486154"
+      Distal pressure: 0.0
+      Zero out perimeter: 0
+      Impose flux: 0
+   }}
+
+   Add BC: lumen_wall {{
+      Type: Dirichlet
+      Time dependence: General
+      Temporal and spatial values file path: /global-scratch/bulk_pool/afernando/Docker/{radice_dataset[:-1]}/wall_displacement.dat
+      Profile: Flat
+      Zero out perimeter: 0
+      Impose flux: 0
+      Impose on state variable integral: 1
+   }}
+}}
+
+Add equation: mesh {{
+   Coupled: 1
+   Min iterations: 2
+   Max iterations: 5
+   Tolerance: 1e-4
+   Poisson ratio: 0.3
+
+   LS type: CG {{
+      Preconditioner: FSILS
+      Tolerance: 1e-4
+   }}
+
+   Output: Spatial {{
+      Displacement: t
+   }}
+
+   Add BC: lumen_inlet {{
+      Type: Dirichlet 
+      Time dependence: General
+      Temporal and spatial values file path: /global-scratch/bulk_pool/afernando/Docker/{radice_dataset[:-1]}/inlet_displacement.dat
+      Profile: Flat
+      Zero out perimeter: 0
+      Impose flux: 0
+      Impose on state variable integral: 1
+   }}
+   
+   Add BC: lumen_outlet {{
+      Type: Dirichlet 
+      Time dependence: General
+      Temporal and spatial values file path: /global-scratch/bulk_pool/afernando/Docker/{radice_dataset[:-1]}/outlet_displacement.dat
+      Profile: Flat
+      Zero out perimeter: 0
+      Impose flux: 0
+      Impose on state variable integral: 1
+   }}
+   
+   Add BC: lumen_wall {{
+      Type: Dirichlet 
+      Time dependence: General
+      Temporal and spatial values file path: /global-scratch/bulk_pool/afernando/Docker/{radice_dataset[:-1]}/wall_displacement.dat
+      Profile: Flat
+      Zero out perimeter: 0
+      Impose flux: 0
+      Impose on state variable integral: 1
+   }}
+}}
+"""
+
+# Scrive il testo in un file
+with open(os.path.join(radice_dataset[:-1], f"{radice_dataset[:-1]}_fsi.inp" ), "w") as file:
+    file.write(config_text)
 
 print("Script completed successfully.")
