@@ -91,8 +91,23 @@ with open(file_path, 'r') as fid:
 
     #print(f"Time vector: {t0}")
 
+#=========================================
+# 2. Create folder structure to save files
+#=========================================
+
+# Create the base directory for the dataset
+subfolders = [
+    os.path.join(radice_dataset[:-1], "mesh"),
+    os.path.join(radice_dataset[:-1], "mesh", "mesh-surfaces"),
+    os.path.join(radice_dataset[:-1], "plots")
+]
+
+# Create the subfolders if they do not exist
+for folder in subfolders:
+    os.makedirs(folder, exist_ok=True)
+
 #==============================================================================
-# 2. Load the .ucd files and extract node coordinates and triangle connectivity
+# 3. Load the .ucd files and extract node coordinates and triangle connectivity
 #==============================================================================
 
 # Initialize arrays with zeros
@@ -135,11 +150,11 @@ print("Loading Done")
 # normalplot(v0, f0, 1) # plot delle normali alla mesh rada \decommentare
 
 #============================================================
-# 3. Reorder and extend the time vector and the displacements
+# 4. Reorder and extend the time vector and the displacements
 #============================================================
 
 # rr_true = t0[-1]
-[t1,v1] = riordina(t0,v0,ed,rr)
+[t1,v1] = riordina(t0,v0,ed,rr) # t1 is the reordered time vector, v1 is the reordered displacements matrix
 
 # Extend the displacements to increase the number of cycles
 num_sequences = 3 # Number of sequences wanted
@@ -161,18 +176,140 @@ for i in range(1, num_sequences + 1):
     t2[(i - 1) * nt:i * nt] = t1[:nt] + (i - 1) * rr
 t2[-1] = rr * num_sequences
 
+#=================================
+# 5. Mesh evaluation and remeshing
+#=================================
+
+mesh = np_to_pv(v2[:,:,0],f0) # Load the mesh from the numpy arrays
+# mesh.save("coarse_mesh.vtp")  # Save the coarse mesh for reference
+avg,_,_ = mesh_quality(mesh)
+
+if avg['aspect_ratio'] > 1.5 or avg['radius_ratio'] > 1.5:
+    print("The mesh quality is poor.")
+    print("Remeshing should be done.")
+    flag = True
+else:
+    print("The mesh quality is good.")
+    print("No need to remesh.")
+
+
+if flag:
+    # edges = mesh.extract_all_edges().compute_cell_sizes()
+    # avg_edge = edges['Length'].mean()
+    # hausd = avg_edge  # Use this instead of a hardcoded 0.3
+    remesh = mmg_remesh(mesh, hausd=0.1,verbose=True  ) # Remesh the mesh using MMG
+
+    avg,_,_ = mesh_quality(remesh)
+
+    if avg['aspect_ratio'] > 1.5 or avg['radius_ratio'] > 1.5:
+        print("The mesh quality is poor.")
+        print("Remeshing should be done.")
+
+    else:
+        print("The mesh quality is good.")
+        print("No need to remesh.")
+
+    remesh = remesh.triangulate() # Ensure the remeshed mesh is triangulated
+    vert, fac = pv_to_np(remesh)  # Convert remeshed mesh to numpy arrays
+    vert = vert[:, :, np.newaxis]
+    normalplot(vert, fac, 0)  # Plot the normals of the remeshed mesh
+else:
+    remesh = mesh.triangulate() # Ensure the mesh is triangulated
+
+# Compute the average edge length of the remeshed surface
+edges = remesh.extract_all_edges()
+length = edges.compute_cell_sizes(length=True).cell_data['Length']
+l = np.mean(length)
+
+#======================================================
+# 6. Generate the volume mesh from the remeshed surface
+#======================================================
+
+# TetGen options (preserve surface, good quality)
+a = l**3 / (6 * np.sqrt(2))
+tetgen_options = f"pq1.2a{a}Y"
+
+tet = tetgen.TetGen(remesh)
+tet.tetrahedralize(order=1, switches=tetgen_options) # "pq1.2a0.333" or tet.tetrahedralize(order=1, switches=tetgen_options)
+
+# Convert to PyVista mesh
+grid = tet.grid
+
+# grid.plot(show_edges=True)
+
+# get cell centroids
+cells = grid.cells.reshape(-1, 5)[:, 1:]
+cell_center = grid.points[cells].mean(1)
+
+# extract cells below the 0 xy plane
+mask = cell_center[:, 2] < 0
+cell_ind = mask.nonzero()[0]
+subgrid = grid.extract_cells(cell_ind)
+
+# advanced plotting
+plotter = pv.Plotter()
+plotter.add_mesh(subgrid, 'lightgrey', lighting=True, show_edges=True)
+plotter.add_mesh(remesh, 'r', 'wireframe')
+plotter.add_legend([[' Input Mesh ', 'r'],
+                    [' Tessellated Mesh ', 'black']])
+plotter.show()
+
+# Save as VTU
+grid.point_data["GlobalNodeID"] = np.arange(grid.points.shape[0]) + 1
+grid.cell_data["GlobalElementID"] = np.arange(grid.n_cells) + 1
+grid.cell_data["ModelRegionID"] = np.ones(grid.n_cells, dtype=int)  # Set to one for all cells
+grid.save(os.path.join(radice_dataset[:-1], "mesh", "mesh-complete.mesh.vtu"))
+
+surf_mesh = grid.extract_geometry()
+
+# Verify if the surface mesh has been modified
+print(f"Surface mesh has been modified: {not np.array_equal(surf_mesh.points, remesh.points)}")
+
+inlet, outlet, wall, surface = get_bounds(surf_mesh) # Extract inlet, outlet, and wall surfaces from the remeshed surface mesh
+
+# Save the inlet, outlet, and wall surfaces
+inlet.save(os.path.join(radice_dataset[:-1], "mesh", "mesh-surfaces", "inlet.vtp"))
+outlet.save(os.path.join(radice_dataset[:-1], "mesh", "mesh-surfaces", "outlet.vtp"))
+wall.save(os.path.join(radice_dataset[:-1], "mesh", "mesh-surfaces", "wall.vtp"))
+surface.save(os.path.join(radice_dataset[:-1], "mesh", "mesh-complete.exterior.vtp"))
+#==================================================================================
+# 7. Remapping the coarse meshes of the time interpolated data on the remeshed mesh
+#==================================================================================
+
+v3_0, f1 = pv_to_np(surf_mesh)  # Convert remeshed mesh to numpy arrays
+
+# Initialize v4 with the appropriate dimensions
+v3 = np.zeros((v3_0.shape[0], v3_0.shape[1], v2.shape[2]))
+
+tr = f0
+p = v3_0
+
+# Loop through each time step
+for i in range(v2.shape[2] - 1):
+    vr = v2[:, :, i]
+    ur = v2[:, :, i + 1] - v2[:, :, i]
+
+    # Assuming resample_u is already defined, and returns pp and upp
+    pp, upp = resample_u(vr, tr, ur, p)
+
+    # Store the results in v4
+    v3[:, :, i] = pp
+    p = upp + pp
+    v3[:, :, i + 1] = p
+
+timeplot(v3,f1)
 #===========================================================
-# 4. Interpolation of the data to create intermediate frames
+# 5. Interpolation of the data to create intermediate frames
 #===========================================================
 
 num_intermedie = 4  # Number of intermediate frames to insert between each original frame
 frames_3  = frames_2 + (frames_2- 1) * num_intermedie
 
-# Initialize v3 with the appropriate dimensions
-v3 = np.zeros((v2.shape[0], v2.shape[1], frames_3))
-v_cubic = np.zeros(v3.shape)  # For cubic interpolation
-v_linear = np.zeros(v3.shape)  # For linear interpolation
-v_pchip = np.zeros(v3.shape)  # For PCHIP interpolation
+# Initialize v4 with the appropriate dimensions
+v4 = np.zeros((v2.shape[0], v2.shape[1], frames_3))
+v_cubic = np.zeros(v4.shape)  # For cubic interpolation
+v_linear = np.zeros(v4.shape)  # For linear interpolation
+v_pchip = np.zeros(v4.shape)  # For PCHIP interpolation
 
 # Create a time vector for the new frames
 t3 = np.linspace(t2[0], t2[-1], frames_3)
@@ -215,116 +352,8 @@ plt.ylabel('Volume')
 plt.title('Volume Over Time')
 plt.show()
 
-v3 = v_fourier  # Use the Fourier interpolated data for further processing
-normalplot(v3, f0, 1)  # Plot the normals of the interpolated mesh
-#=================================
-# 5. Mesh evaluation and remeshing
-#=================================
-
-mesh = np_to_pv(v3[:,:,0],f0) # Load the mesh from the numpy arrays
-# mesh.save("coarse_mesh.vtp")  # Save the coarse mesh for reference
-avg,_,_ = mesh_quality(mesh)
-
-if avg['aspect_ratio'] > 1.5 or avg['radius_ratio'] > 1.5:
-    print("The mesh quality is poor.")
-    print("Remeshing should be done.")
-
-else:
-    print("The mesh quality is good.")
-    print("No need to remesh.")
-
-edges = mesh.extract_all_edges().compute_cell_sizes()
-avg_edge = edges['Length'].mean()
-hausd = avg_edge  # Use this instead of a hardcoded 0.3
-
-# gmsh_mesh = gmsh_remesh(mesh)
-remesh = mmg_remesh(mesh, hausd=hausd,verbose=True  ) # Remesh the mesh using MMG
-
-avg,_,_ = mesh_quality(remesh)
-
-if avg['aspect_ratio'] > 1.5 or avg['radius_ratio'] > 1.5:
-    print("The mesh quality is poor.")
-    print("Remeshing should be done.")
-
-else:
-    print("The mesh quality is good.")
-    print("No need to remesh.")
-
-remesh = remesh.triangulate() # Ensure the remeshed mesh is triangulated
-vert, fac = pv_to_np(remesh)  # Convert remeshed mesh to numpy arrays
-vert = vert[:, :, np.newaxis]
-normalplot(vert, fac, 0)  # Plot the normals of the remeshed mesh
-#======================================================
-# 6. Generate the volume mesh from the remeshed surface
-#======================================================
-# TetGen options (preserve surface, good quality)
-tetgen_options = "pq1.2a0.333"
-
-tet = tetgen.TetGen(remesh)
-tet.tetrahedralize(order=1, switches=tetgen_options) # "pq1.2a0.333" or tet.tetrahedralize(order=1, switches=tetgen_options)
-
-# Convert to PyVista mesh
-grid = tet.grid
-
-# grid.plot(show_edges=True)
-
-# get cell centroids
-cells = grid.cells.reshape(-1, 5)[:, 1:]
-cell_center = grid.points[cells].mean(1)
-
-# extract cells below the 0 xy plane
-mask = cell_center[:, 2] < 0
-cell_ind = mask.nonzero()[0]
-subgrid = grid.extract_cells(cell_ind)
-
-# advanced plotting
-plotter = pv.Plotter()
-plotter.add_mesh(subgrid, 'lightgrey', lighting=True, show_edges=True)
-plotter.add_mesh(remesh, 'r', 'wireframe')
-plotter.add_legend([[' Input Mesh ', 'r'],
-                    [' Tessellated Mesh ', 'black']])
-plotter.show()
-
-# Save as VTU
-grid.point_data["GlobalNodeID"] = np.arange(grid.points.shape[0]) + 1
-grid.cell_data["GlobalElementID"] = np.arange(grid.n_cells) + 1
-grid.cell_data["ModelRegionID"] = np.ones(grid.n_cells, dtype=int)  # Set to one for all cells
-grid.save("mesh-complete.mesh.vtu")
-
-surf_mesh = grid.extract_geometry()
-
-surf_mesh.save("mesh-complete.exterior.vtp")
-
-_,_,_ = get_bounds(surf_mesh) # ("cyl.stl")
+v4 = v_fourier  # Use the Fourier interpolated data for further processing
+# normalplot(v4, f1, 1)  # Plot the normals of the interpolated mesh
 
 
-
-
-
-
-#==================================================================================
-# 7. Remapping the coarse meshes of the time interpolated data on the remeshed mesh
-#==================================================================================
-
-v4_, f4 = pv_to_np(remesh)  # Convert remeshed mesh to numpy arrays
-
-# Initialize v3 with the appropriate dimensions
-v4 = np.zeros((v4_0.shape[0], v4_0.shape[1], v3.shape[2]))
-
-tr = f0
-p = v3[:, :, 0]
-
-# Loop through each time step
-for i in range(v3.shape[2] - 1):
-    vr = v3[:, :, i]
-    ur = v3[:, :, i + 1] - v3[:, :, i]
-
-    # Assuming resample_u is already defined, and returns pp and upp
-    pp, upp = resample_u(vr, tr, ur, p)
-
-    # Store the results in v3
-    v4[:, :, i] = pp
-    p = upp + pp
-    v4[:, :, i + 1] = p
-
-# timeplot(v3,f2)
+print("Script completed successfully.")
