@@ -305,8 +305,14 @@ for i in range(v2.shape[2] - 1):
 # 8. Interpolation of the data to create intermediate frames
 #===========================================================
 
-num_intermedie = 4  # Number of intermediate frames to insert between each original frame
-frames_3  = frames_2 + (frames_2- 1) * num_intermedie
+# num_intermedie = 4  # Number of intermediate frames to insert between each original frame
+dt = 1 # Time step size for the new frames
+t3 = np.arange(t2[0], t2[-1] + dt, dt)  # New time vector with the desired time step
+if t3[-1] > t2[-1] and not np.isclose(t3[-1], t2[-1]):
+    t3 = t3[:-1]  # Remove the last time point if it exceeds the original end time
+# t3[-1] = t2[-1]  # Ensure the last time point matches the original end time
+frames_3 = len(t3)  # Total number of frames in the new time vector
+# frames_3  = frames_2 + (frames_2- 1) * num_intermedie
 
 # Initialize v4 with the appropriate dimensions
 v4 = np.zeros((v3.shape[0], v3.shape[1], frames_3))
@@ -315,7 +321,7 @@ v_linear = np.zeros(v4.shape)  # For linear interpolation
 v_pchip = np.zeros(v4.shape)  # For PCHIP interpolation
 
 # Create a time vector for the new frames
-t3 = np.linspace(t2[0], t2[-1], frames_3)
+# t3 = np.linspace(t2[0], t2[-1], frames_3)
 
 # Cubic interpolation
 for i in range(v3.shape[0]):  # For each node
@@ -339,22 +345,22 @@ for i in range(v3.shape[0]):
         v_pchip[i, dim, :] = pchip_interp(t3)
 
 # Fourier interpolation
-v_fourier = fourier(v_pchip, t2, 0)
+v_fourier = fourier(v_pchip, t3)
 
 # Create the plot for the original and interpolated volumes
-# plt.figure()
-# plt.plot(t2,volume(v3,f1), '*', label='volOriginal')
-# plt.plot(t3,volume(v_cubic, f1), label='volCubic')
-# plt.plot(t3,volume(v_linear, f1), label='volLinear')
-# plt.plot(t3,volume(v_pchip, f1), label='volPchip')
-# plt.plot(t3,volume(v_fourier, f1), label='volFourier')
-# plt.legend()
-# plt.grid(True)
-# plt.xlabel('Time Frame')
-# plt.ylabel('Volume')
-# plt.title('Volume Over Time')
-# plt.savefig(os.path.join(radice_dataset[:-1], "plots", "volume_interpolation.png"))
-# plt.show()
+plt.figure()
+plt.plot(t2,volume(v3,f1), '*', label='volOriginal')
+plt.plot(t3,volume(v_cubic, f1), label='volCubic')
+plt.plot(t3,volume(v_linear, f1), label='volLinear')
+plt.plot(t3,volume(v_pchip, f1), label='volPchip')
+plt.plot(t3,volume(v_fourier, f1), label='volFourier')
+plt.legend()
+plt.grid(True)
+plt.xlabel('Time Frame')
+plt.ylabel('Volume')
+plt.title('Volume Over Time')
+plt.savefig(os.path.join(radice_dataset[:-1], "plots", "volume_interpolation.png"))
+plt.show()
 
 v4 = v_fourier  # Use the Fourier interpolated data for further processing
 # normalplot(v4, f1, 1)  # Plot the normals of the interpolated mesh
@@ -477,7 +483,7 @@ config_text = f"""\
 
 Continue previous simulation: 0
 Number of spatial dimensions: 3
-Number of time steps: 3076
+Number of time steps: {frames_3}
 Time step size: 0.001
 Spectral radius of infinite time step: 0.50
 Searched file name to trigger stop: STOP_SIM

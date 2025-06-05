@@ -80,7 +80,7 @@ def volume(matrix1, TM1):
     # print("Fatto.")
     return vol
 
-
+'''
 def fourier(matrix2, time, num_intermedie):
     # print('Increasing number of frames with Fourier interpolation.')
 
@@ -93,6 +93,40 @@ def fourier(matrix2, time, num_intermedie):
     new_time = np.linspace(time[0], time[-1], num_frames_interpolati)  # Nuova timeline uniforme
     nt = (len(new_time) - matrix2.shape[2]) // 2
     dt = new_time[1] - new_time[0]
+
+    # Ciclo per interpolare armonicamente ogni punto della mesh
+    for i in range(matrix2.shape[0]):  # Per ogni nodo
+        for j in range(matrix2.shape[1]):  # Per ogni direzione (x, y, z)
+            # Estrazione del segnale originale
+            signal = matrix2[i, j, :]
+
+            # Trasformata di Fourier del segnale
+            F = np.fft.fft(signal)
+            F = np.fft.fftshift(F)
+            F = np.concatenate((np.zeros(nt), F, np.zeros(nt)))  # Aggiungi zeri per l'interpolazione
+            F = np.fft.ifftshift(F)
+            k = np.fft.ifft(F) * len(F) / len(signal)
+            new_matrix[i, j, :] = np.real(k)
+
+            # Frequenze corrispondenti per la derivata
+            freqs = np.fft.fftfreq(len(F), d=dt)
+
+    fasi = num_frames_interpolati
+    # print('Done.')
+
+    return new_matrix
+'''
+
+def fourier(matrix2, time):
+    # print('Increasing number of frames with Fourier interpolation.')
+
+    # Numero totale di frame interpolati
+    num_frames_interpolati = len(time)
+
+    # Pre-allocazione per la nuova matrice
+    new_matrix = np.zeros((matrix2.shape[0], matrix2.shape[1], num_frames_interpolati))
+    nt = (len(time) - matrix2.shape[2]) // 2 # Numero di zeri da aggiungere per l'interpolazione
+    dt = time[1] - time[0]
 
     # Ciclo per interpolare armonicamente ogni punto della mesh
     for i in range(matrix2.shape[0]):  # Per ogni nodo
@@ -572,7 +606,7 @@ import numpy as np
 import pyvista as pv
 import meshio
 
-def mmg_remesh(input_mesh, hausd=0.3, hmax=2, hmin=1.5, ar=20, max_aspect_ratio=None, max_iter=3, verbose=False):
+def mmg_remesh(input_mesh, hausd=0.3, hmax=2, hmin=1.5, ar=30, max_aspect_ratio=None, max_iter=3, verbose=False):
     #crea un idetificatore univoco per la mesh
     mesh_id = os.getpid()
     input_mesh.clear_data()
