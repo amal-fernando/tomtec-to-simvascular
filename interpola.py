@@ -1,9 +1,11 @@
 import tkinter as tk
 from tkinter import filedialog
 import numpy as np
+from PyQt5.QtGui import qt_set_sequence_auto_mnemonic
+
 from funzioni import riordina, timeplot, resample_u, pv_to_np, np_to_pv, write_motion
 from funzioni import volume, normalplot, mmg_remesh, mesh_quality, get_bounds
-from funzioni import fourier
+from funzioni import fourier, flow
 import matplotlib
 matplotlib.use('TkAgg')  # Use TkAgg backend instead of Qt
 import matplotlib.pyplot as plt
@@ -148,7 +150,30 @@ print("Loading Done")
 
 # timeplot(v0,f0) # plot della mesh rada nel tempo \decommentare
 normalplot(v0, f0, 1, os.path.join(radice_dataset[:-1], "plots", "normalplot_coarse.obj"), show=False) # plot delle normali alla mesh rada \decommentare
+vol = volume(v0, f0)/1000  # Calculate the volume of the coarse mesh in mL
+plt.figure()
+plt.plot(t0, vol, 'o-', label='volOriginal')
+plt.xticks(t0.squeeze())
+plt.yticks(vol)
+plt.xlabel('Time [ms]')
+plt.ylabel('Volume [mL]')
+plt.title('Volume Over Time')
+plt.grid(True)
+plt.legend()
+plt.show()
 
+print(f"End Systole and End Diastole times: {es}, {ed}")
+
+# Finds the indices of end-systolic and end-diastolic frames
+idx_es = np.argmin(vol)
+idx_ed = np.argmax(vol)
+
+# Check if the end-systolic and end-diastolic times are aligned with the time vector
+is_aligned = (t0[idx_es] == es) and (t0[idx_ed] == ed)
+
+print(f"These values are aligned with the time vector: {is_aligned}")
+print(f"ESV, EDV: {vol[idx_es]:.2f} ml, {vol[idx_ed]:.2f} mL")
+print(f"SV, EF: {(vol[idx_ed] - vol[idx_es]):.2f} mL, {(vol[idx_ed] - vol[idx_es]) / vol[idx_ed] * 100:.2f} %")
 
 #============================================================
 # 4. Reorder and extend the time vector and the displacements
@@ -156,6 +181,21 @@ normalplot(v0, f0, 1, os.path.join(radice_dataset[:-1], "plots", "normalplot_coa
 
 # rr_true = t0[-1]
 [t1,v1] = riordina(t0,v0,ed,rr) # t1 is the reordered time vector, v1 is the reordered displacements matrix
+
+vol = volume(v1, f0)/1000  # Calculate the volume of the coarse mesh in mL
+plt.figure()
+plt.plot(t1, vol, 'o-', label='volOriginal')
+plt.xticks(t1.squeeze())
+plt.yticks(vol)
+plt.xlabel('Time [ms]')
+plt.ylabel('Volume [mL]')
+plt.title('Volume Over Time')
+plt.grid(True)
+plt.legend()
+plt.show()
+
+new_ed = t1[0]  # Update end-diastolic time to the last time point of the reordered vector
+new_es = new_ed-(ed-es)  # Update end-systolic time to the last time point plus RR interval
 
 # Extend the displacements to increase the number of cycles
 num_sequences = 3 # Number of sequences wanted
@@ -176,6 +216,18 @@ t2 = np.zeros(num_sequences * nt + 1)
 for i in range(1, num_sequences + 1):
     t2[(i - 1) * nt:i * nt] = t1[:nt] + (i - 1) * rr
 t2[-1] = rr * num_sequences
+
+vol = volume(v2, f0)/1000  # Calculate the volume of the coarse mesh in mL
+plt.figure()
+plt.plot(t2, vol, 'o-', label='volOriginal')
+# plt.xticks(t2.squeeze())
+# plt.yticks(vol)
+plt.xlabel('Time [ms]')
+plt.ylabel('Volume [mL]')
+plt.title('Volume Over Time')
+plt.grid(True)
+plt.legend()
+plt.show()
 
 #=================================
 # 5. Mesh evaluation and remeshing
@@ -301,6 +353,28 @@ for i in range(v2.shape[2] - 1):
     v3[:, :, i + 1] = p
 
 # timeplot(v3,f1)
+
+vol = volume(v3, f1)/1000  # Calculate the volume of the coarse mesh in mL
+plt.figure()
+plt.plot(t2, vol, 'o-', label='volOriginal')
+# plt.xticks(t2.squeeze())
+# plt.yticks(vol)
+plt.xlabel('Time [ms]')
+plt.ylabel('Volume [mL]')
+plt.title('Volume Over Time')
+plt.grid(True)
+plt.legend()
+plt.show()
+
+# Finds the indices of end-systolic and end-diastolic frames
+idx_es = np.argmin(vol[:len(vol)//3]) # Only consider the first third of the volume for end-systolic
+idx_ed = np.argmax(vol[:len(vol)//3]) # Only consider the first third of the volume for end-diastolic
+
+# Check if the end-systolic and end-diastolic times are aligned with the time vector
+is_aligned = np.isclose(t2[idx_es],new_es) and np.isclose(t2[idx_ed], new_ed)
+print(f"These values are aligned with the time vector: {is_aligned}")
+print(f"ESV, EDV: {vol[idx_es]:.2f} ml, {vol[idx_ed]:.2f} mL")
+print(f"SV, EF: {(vol[idx_ed] - vol[idx_es]):.2f} mL, {(vol[idx_ed] - vol[idx_es]) / vol[idx_ed] * 100:.2f} %")
 #===========================================================
 # 8. Interpolation of the data to create intermediate frames
 #===========================================================
@@ -365,84 +439,84 @@ plt.show()
 v4 = v_fourier  # Use the Fourier interpolated data for further processing
 # normalplot(v4, f1, 1)  # Plot the normals of the interpolated mesh
 
+vol = volume(v4, f1)/1000  # Calculate the volume of the coarse mesh in mL
+plt.figure()
+plt.plot(t3, vol, 'o-', label='volOriginal')
+# plt.xticks(t2.squeeze())
+# plt.yticks(vol)
+plt.xlabel('Time [ms]')
+plt.ylabel('Volume [mL]')
+plt.title('Volume Over Time')
+plt.grid(True)
+plt.legend()
+plt.show()
+
+# Finds the indices of end-systolic and end-diastolic frames
+idx_es = np.argmin(vol[:len(vol)//3]) # Only consider the first third of the volume for end-systolic
+idx_ed = np.argmax(vol[:len(vol)//3]) # Only consider the first third of the volume for end-diastolic
+
+# Check if the end-systolic and end-diastolic times are aligned with the time vector
+is_aligned = np.isclose(t3[idx_es],new_es) and np.isclose(t3[idx_ed], new_ed)
+if not is_aligned:
+    new_ed = t3[idx_ed]
+    new_es = t3[idx_es]
+is_aligned = np.isclose(t3[idx_es],new_es) and np.isclose(t3[idx_ed], new_ed)
+print(f"These values are aligned with the time vector: {is_aligned}")
+print(f"ESV, EDV: {vol[idx_es]:.2f} ml, {vol[idx_ed]:.2f} mL")
+print(f"SV, EF: {(vol[idx_ed] - vol[idx_es]):.2f} mL, {(vol[idx_ed] - vol[idx_es]) / vol[idx_ed] * 100:.2f} %")
+
 #==========================================================
 # 9. Generate the input files for the simulation
 #==========================================================
-V = volume(v4, f1)  # Calculate the volume for the Fourier interpolated data
-# Create a time vector for the new frames
-time = t3.flatten()/1000
-flow_rate = np.gradient(V, time)  # Automatically handles variable time steps N.B. 1 mm3/ms = 1 cm3/s
 
-# Save to .flow file
-with open(os.path.join(radice_dataset[:-1], "inlet.flow"), "w") as f:
-    f.write(f"{len(t3.flatten())} {inlet.n_points}\n")  # Write number of time steps and nodes
-    for t, q in zip(t3.flatten()/1000, flow_rate):
-        # Convert q to a scalar and write to file
-        f.write(f"{t:.7f} {q:.7f}\n")
-
-
-# Calculate the displacement
-displacement = v4 - v4[:,:,0][:, :, np.newaxis]
+# a. Generate the .dat file for the displacements
+displacement = v4 - v4[:,:,0][:, :, np.newaxis] # Displacements from the initial frame for the whole mesh
 
 write_motion(displacement, t3, wall, surface, os.path.join(radice_dataset[:-1], "wall" ))
 write_motion(displacement, t3, inlet, surface, os.path.join(radice_dataset[:-1], "inlet"))
 write_motion(displacement, t3, outlet, surface, os.path.join(radice_dataset[:-1], "outlet"))
 
+# b. Generate the .flow file for the inlet
+V = volume(v4, f1)  # Calculate the volume for the Fourier interpolated data
 
-''' Genero file bct.vtp per 'inlet' '''
+Q_in, Q_out = flow(V, t3)
 
-# === Caricamento dati ===
+# Save to .flow file
+with open(os.path.join(radice_dataset[:-1], "inlet.flow"), "w") as f:
+    f.write(f"{len(t3.flatten())} {inlet.n_points}\n")  # Write number of time steps and nodes
+    for t, q in zip(t3.flatten()/1000, Q_in):
+        # Convert q to a scalar and write to file
+        f.write(f"{t:.7f} {q:.7f}\n")
+
+# c. Generate the .bct file for the inlet
+# === Load the inlet mesh ===
 inlet = pv.read(os.path.join(radice_dataset[:-1], "mesh", "mesh-surfaces", "inlet.vtp"))
 points = inlet.points
 node_ids = inlet.point_data["GlobalNodeID"]
 normals = np.array(inlet.point_normals)
 
-
 time = t3.flatten()/1000  # Convert to seconds
 nl = len(time)
 
-# === Calcolo area ===
+# === Calculate the area of the inlet surface ===
 mesh = pv.PolyData(points)
 tri = mesh.delaunay_2d()
 area = tri.area
 
-# === Centroide dell'inlet ===
+# === Centroide of the inlet surface ===
 centroid = points.mean(axis=0)
 
-# === Raggio massimo (per profilo parabolico) ===
+# === Max radius from the centroid ===
 radii = np.linalg.norm(points[:, :2] - centroid[:2], axis=1)
 r_max = radii.max()
 
 
-# === Lista di tutte le matrici di velocità ===
+# === List to store velocity matrices ===
 velocità = []  # contiene velocity_0.0000, velocity_0.0001, ...
 
-'''
-# === Preparazione file ===
-lines = [f"{len(points)} {nl}"]
-
-for i, pt in enumerate(points):
-    x, y, z = pt
-    nn = int(node_ids[i])
-    normal = normals[i]
-
-    # Distanza radiale dal centroide nel piano (x, y)
-    r = np.linalg.norm(pt[:2] - centroid[:2])
-    shape_factor = 1 - (r / r_max) ** 2  # parabola
-
-    lines.append(f"{x:.6f} {y:.6f} {z:.6f} {nl} {nn}")
-    for j in range(nl):
-        Q = flow_rate[j]
-        v_mean = Q / area
-        v_mag = 2 * v_mean * shape_factor  # parabola: vmax = 2 * v_mean
-        vx, vy, vz = normal * v_mag
-        t = time[j]
-        lines.append(f"{vx:.6f} {vy:.6f} {vz:.6f} {t:.6f}")
-'''
-
-# === Ciclo sui tempi per costruire le matrici ===
+# === Cycle through each time step ===
 for j in range(nl):
-    Q = flow_rate[j]
+    Q = Q_in[j]
     v_mean = Q / area
     t = time[j]
 
@@ -469,13 +543,10 @@ for j in range(nl):
     # # Aggiungi alla lista globale
     # velocità.append(velocity_matrix)
 
-# === Salvataggio in file VTP ===
+# === Saving in a .vtp file ===
 inlet.save(os.path.join(radice_dataset[:-1], "bct.vtp"))
 
-
-print("Done!")
-
-# Generate the .inp file for the simulation
+# d. Generate the .inp file for the simulation
 
 config_text = f"""\
 #----------------------------------------------------------------

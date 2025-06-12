@@ -1415,3 +1415,50 @@ def gmsh_remesh(mesh):
 
     return grid
 '''
+
+import numpy as np
+import matplotlib
+
+matplotlib.use('Qt5Agg')
+import matplotlib.pyplot as plt
+from scipy.signal import savgol_filter
+
+
+def flow(V, t):
+    """
+    Calcola il flusso volumetrico a partire da una matrice di nodi e una matrice di connettività.
+
+    :param V: volume (mm3)
+    :param t: vettore temporale (ms)
+    :return: flusso volumetrico (mm3/s)
+    """
+
+    # V /= 1000 # volume in mL [3057]
+    t = t / 1000  # Converti il tempo da ms a s
+
+    dV_dt = np.gradient(V, t)  # flow in mL/s
+
+    def softplus(x, beta=0.2):  # Softplus
+        return np.log(1 + np.exp(
+            beta * x)) / beta  # beta = 1: molto morbido, beta = 10 # raccordo visibile ma più netto, beta = 20–50: quasi come ReLU, ma ancora smooth
+
+    Q_in = softplus(dV_dt)  # Inflow: softplus per evitare valori negativi
+    Q_out = -softplus(-dV_dt)  # Outflow: softplus negativo per evitare valori negativi
+
+    Q_in = savgol_filter(Q_in, window_length=31, polyorder=3)
+    Q_out = savgol_filter(Q_out, window_length=31, polyorder=3)
+
+    # Visualizza i risultati
+    plt.figure(figsize=(12, 6))
+    plt.plot(t, dV_dt, label='Flow Rate (from gradient)', alpha=0.5)
+    plt.plot(t, Q_in, label='Q_in (inflow)', color='blue')
+    plt.plot(t, Q_out, label='Q_out (outflow)', color='red')
+    plt.xlabel('Time [s]')
+    plt.ylabel('Flow Rate [mm3/s]')
+    plt.title('Inflow and Outflow Over Time')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    return Q_in, Q_out
