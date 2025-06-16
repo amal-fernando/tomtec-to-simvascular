@@ -1438,9 +1438,12 @@ def flow(V, t):
 
     dV_dt = np.gradient(V, t)  # flow in mL/s
 
-    def softplus(x, beta=0.2):  # Softplus
-        return np.log(1 + np.exp(
-            beta * x)) / beta  # beta = 1: molto morbido, beta = 10 # raccordo visibile ma più netto, beta = 20–50: quasi come ReLU, ma ancora smooth
+    # def softplus(x, beta=0.2):  # Softplus
+    #     return np.log(1 + np.exp(beta * x)) / beta  # beta = 1: molto morbido, beta = 10 # raccordo visibile ma più netto, beta = 20–50: quasi come ReLU, ma ancora smooth
+
+    def softplus(x, beta=0.0002):  # Softplus
+        return np.logaddexp(0, x * beta)/beta   # Softplus function
+
 
     Q_in = softplus(dV_dt)  # Inflow: softplus per evitare valori negativi
     Q_out = -softplus(-dV_dt)  # Outflow: softplus negativo per evitare valori negativi
@@ -1462,3 +1465,30 @@ def flow(V, t):
     plt.show()
 
     return Q_in, Q_out
+
+
+if __name__ == "__main__":
+    v4 = np.load("v4.npy")  # Load the volume data
+    f1 = np.load("f1.npy")  # Load the connectivity data
+    t3 = np.load("t3.npy")  # Load the time data
+
+    V = volume(v4, f1)  # Calculate the volume for the Fourier interpolated data
+
+    Q_in, Q_out = flow(V, t3)
+
+    n_inlet_points = 256  # Number of inlet points to write in the .flow file
+    n_outlet_points = 227  # Number of outlet points to write in the .flow file
+
+    # Save to inlet.flow file
+    with open("inlet.flow", "w") as f:
+        f.write(f"{len(t3.flatten())} {n_inlet_points}\n")  # Write number of time steps and nodes
+        for t, q in zip(t3.flatten() / 1000, -Q_in):
+            # Convert q to a scalar and write to file
+            f.write(f"{t:.7f} {q:.7f}\n")
+
+    # Save to outlet.flow file
+    with open("outlet.flow", "w") as f:
+        f.write(f"{len(t3.flatten())} {n_outlet_points}\n")  # Write number of time steps and nodes
+        for t, q in zip(t3.flatten() / 1000, -Q_out):
+            # Convert q to a scalar and write to file
+            f.write(f"{t:.7f} {q:.7f}\n")
