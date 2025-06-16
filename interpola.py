@@ -481,16 +481,23 @@ V = volume(v4, f1)  # Calculate the volume for the Fourier interpolated data
 
 Q_in, Q_out = flow(V, t3)
 
-# Save to .flow file
+# Save to inlet.flow file
 with open(os.path.join(radice_dataset[:-1], "inlet.flow"), "w") as f:
     f.write(f"{len(t3.flatten())} {inlet.n_points}\n")  # Write number of time steps and nodes
-    for t, q in zip(t3.flatten()/1000, Q_in):
+    for t, q in zip(t3.flatten()/1000, -Q_in):
+        # Convert q to a scalar and write to file
+        f.write(f"{t:.7f} {q:.7f}\n")
+
+# Save to outlet.flow file
+with open(os.path.join(radice_dataset[:-1], "outlet.flow"), "w") as f:
+    f.write(f"{len(t3.flatten())} {outlet.n_points}\n")  # Write number of time steps and nodes
+    for t, q in zip(t3.flatten()/1000, -Q_out):
         # Convert q to a scalar and write to file
         f.write(f"{t:.7f} {q:.7f}\n")
 
 # c. Generate the .bct file for the inlet
 # === Load the inlet mesh ===
-inlet = pv.read(os.path.join(radice_dataset[:-1], "mesh", "mesh-surfaces", "inlet.vtp"))
+# inlet = pv.read(os.path.join(radice_dataset[:-1], "mesh", "mesh-surfaces", "inlet.vtp"))
 points = inlet.points
 node_ids = inlet.point_data["GlobalNodeID"]
 normals = np.array(inlet.point_normals)
@@ -512,7 +519,7 @@ r_max = radii.max()
 
 
 # === List to store velocity matrices ===
-velocità = []  # contiene velocity_0.0000, velocity_0.0001, ...
+# velocità = []  # contiene velocity_0.0000, velocity_0.0001, ...
 
 # === Cycle through each time step ===
 for j in range(nl):
@@ -555,7 +562,7 @@ config_text = f"""\
 Continue previous simulation: 0
 Number of spatial dimensions: 3
 Number of time steps: {frames_3}
-Time step size: 0.001
+Time step size: {dt/1000}
 Spectral radius of infinite time step: 0.50
 Searched file name to trigger stop: STOP_SIM
 
@@ -607,20 +614,11 @@ Add equation: FSI {{
    #   Frequency for copying data: 1
    #}}
 
-
    Domain: 1 {{
       Equation: fluid
       Density: 0.00106
       Viscosity: Constant {{Value: 0.004}}
       Backflow stabilization coefficient: 0.2
-   }}
-
-   Domain: 2 {{
-      Equation: struct
-      Constitutive model: stVK
-      Density: 1
-      Elasticity modulus: 100000
-      Poisson ratio: 0.4
    }}
 
    Output: Spatial {{
@@ -644,31 +642,22 @@ Add equation: FSI {{
       Krylov space dimension: 100
    }}
 
-   #Initialize RCR from flow: t
-   #Add BC: lumen_inlet {{
-      #Type: Dir
-      #Time dependence: Unsteady
-      #Temporal values file path: /global-scratch/bulk_pool/afernando/Docker/{radice_dataset[:-1]}/inlet.flow
-      #Profile: Parabolic
-      #Impose flux: 1
-      #Time dependence: General
-      ##BCT file path: /global-scratch/bulk_pool/afernando/Docker/Tubo/bct.vtp
-   #}}
-   
+   Initialize RCR from flow: t
    Add BC: lumen_inlet {{
-      Type: Dirichlet 
-      Time dependence: General
-      Temporal and spatial values file path: /global-scratch/bulk_pool/afernando/Docker/{radice_dataset[:-1]}/inlet_displacement.dat
-      Profile: Flat
-      Zero out perimeter: 0
-      Impose flux: 0
+      Type: Dir
+      Time dependence: Unsteady
+      Temporal values file path: /global-scratch/bulk_pool/afernando/Docker/{radice_dataset[:-1]}/inlet.flow
+      Profile: Parabolic
+      Impose flux: 1
       Impose on state variable integral: 1
-   }}
+      #Time dependence: General
+      #BCT file path: /global-scratch/bulk_pool/afernando/Docker/Tubo/bct.vtp
+   #}}
    
    Add BC: lumen_outlet {{
       Type: Neu
       Time dependence: RCR
-      RCR values: "0.010299941677760955, 1.5940597148021995, 1.182852092486154"
+      RCR values: "0.0044, 123.75, 0.0293"
       Distal pressure: 0.0
       Zero out perimeter: 0
       Impose flux: 0
