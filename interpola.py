@@ -1,8 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog
 import numpy as np
-from PyQt5.QtGui import qt_set_sequence_auto_mnemonic
-
 from funzioni import riordina, timeplot, resample_u, pv_to_np, np_to_pv, write_motion
 from funzioni import volume, normalplot, mmg_remesh, mesh_quality, get_bounds
 from funzioni import fourier, flow
@@ -108,6 +106,10 @@ subfolders = [
 for folder in subfolders:
     os.makedirs(folder, exist_ok=True)
 
+# Create a save path for the mesh
+plot_save_path = subfolders[2]
+show = False  # Flag to control whether to show the plot or not
+
 #==============================================================================
 # 3. Load the .ucd files and extract node coordinates and triangle connectivity
 #==============================================================================
@@ -160,7 +162,14 @@ plt.ylabel('Volume [mL]')
 plt.title('Volume Over Time')
 plt.grid(True)
 plt.legend()
-plt.show()
+if plot_save_path is not None:
+    plt.savefig(os.path.join(plot_save_path, "volume_coarse.png"))
+    print(f'Mesh saved to {plot_save_path}')
+# Show the plot if requested
+if show:
+    plt.show()
+else:
+    plt.close()  # Close the plotter if not showing
 
 print(f"End Systole and End Diastole times: {es}, {ed}")
 
@@ -192,7 +201,14 @@ plt.ylabel('Volume [mL]')
 plt.title('Volume Over Time')
 plt.grid(True)
 plt.legend()
-plt.show()
+if plot_save_path is not None:
+    plt.savefig(os.path.join(plot_save_path, "volume_reordered.png"))
+    print(f'Mesh saved to {plot_save_path}')
+# Show the plot if requested
+if show:
+    plt.show()
+else:
+    plt.close()  # Close the plotter if not showing
 
 new_ed = t1[0]  # Update end-diastolic time to the last time point of the reordered vector
 new_es = new_ed-(ed-es)  # Update end-systolic time to the last time point plus RR interval
@@ -227,7 +243,14 @@ plt.ylabel('Volume [mL]')
 plt.title('Volume Over Time')
 plt.grid(True)
 plt.legend()
-plt.show()
+if plot_save_path is not None:
+    plt.savefig(os.path.join(plot_save_path, "volume_extended.png"))
+    print(f'Mesh saved to {plot_save_path}')
+# Show the plot if requested
+if show:
+    plt.show()
+else:
+    plt.close()  # Close the plotter if not showing
 
 #=================================
 # 5. Mesh evaluation and remeshing
@@ -364,7 +387,14 @@ plt.ylabel('Volume [mL]')
 plt.title('Volume Over Time')
 plt.grid(True)
 plt.legend()
-plt.show()
+if plot_save_path is not None:
+    plt.savefig(os.path.join(plot_save_path, "volume_interpolated.png"))
+    print(f'Mesh saved to {plot_save_path}')
+# Show the plot if requested
+if show:
+    plt.show()
+else:
+    plt.close()  # Close the plotter if not showing
 
 # Finds the indices of end-systolic and end-diastolic frames
 idx_es = np.argmin(vol[:len(vol)//3]) # Only consider the first third of the volume for end-systolic
@@ -433,8 +463,14 @@ plt.grid(True)
 plt.xlabel('Time Frame')
 plt.ylabel('Volume')
 plt.title('Volume Over Time')
-plt.savefig(os.path.join(radice_dataset[:-1], "plots", "volume_interpolation.png"))
-plt.show()
+if plot_save_path is not None:
+    plt.savefig(os.path.join(plot_save_path, "volume_interpolation.png"))
+    print(f'Mesh saved to {plot_save_path}')
+# Show the plot if requested
+if show:
+    plt.show()
+else:
+    plt.close()  # Close the plotter if not showing
 
 v4 = v_fourier  # Use the Fourier interpolated data for further processing
 # normalplot(v4, f1, 1)  # Plot the normals of the interpolated mesh
@@ -449,7 +485,14 @@ plt.ylabel('Volume [mL]')
 plt.title('Volume Over Time')
 plt.grid(True)
 plt.legend()
-plt.show()
+if plot_save_path is not None:
+    plt.savefig(os.path.join(plot_save_path, "volume_interpolated_final.png"))
+    print(f'Mesh saved to {plot_save_path}')
+# Show the plot if requested
+if show:
+    plt.show()
+else:
+    plt.close()  # Close the plotter if not showing
 
 # Finds the indices of end-systolic and end-diastolic frames
 idx_es = np.argmin(vol[:len(vol)//3]) # Only consider the first third of the volume for end-systolic
@@ -478,8 +521,8 @@ write_motion(displacement, t3, outlet, surface, os.path.join(radice_dataset[:-1]
 
 # b. Generate the .flow file for the inlet
 V = volume(v4, f1)  # Calculate the volume for the Fourier interpolated data
-
-Q_in, Q_out = flow(V, t3)
+from funzioni import flow
+Q_in, Q_out = flow(V, t3, plot_save_path, show)
 
 # Save to inlet.flow file
 with open(os.path.join(radice_dataset[:-1], "inlet.flow"), "w") as f:
@@ -652,7 +695,7 @@ Add equation: FSI {{
       Impose on state variable integral: 1
       #Time dependence: General
       #BCT file path: /global-scratch/bulk_pool/afernando/Docker/Tubo/bct.vtp
-   #}}
+   }}
    
    Add BC: lumen_outlet {{
       Type: Neu

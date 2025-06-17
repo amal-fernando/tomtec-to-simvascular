@@ -1424,7 +1424,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import savgol_filter
 
 
-def flow(V, t):
+def flow(V, t, plot_save_path=None, show=False):
     """
     Calcola il flusso volumetrico a partire da una matrice di nodi e una matrice di connettività.
 
@@ -1462,7 +1462,14 @@ def flow(V, t):
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.show()
+    if plot_save_path is not None:
+        plt.savefig(os.path.join(plot_save_path, "flow_plot.png"))
+        print(f'Mesh saved to {plot_save_path}')
+    # Show the plot if requested
+    if show:
+        plt.show()
+    else:
+        plt.close()  # Close the plotter if not showing
 
     return Q_in, Q_out
 
