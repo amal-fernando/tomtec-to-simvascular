@@ -1,4 +1,5 @@
 import numpy as np
+from joblib import Parallel, delayed
 
 def riordina(t, v, t0, T):
     """
@@ -806,8 +807,8 @@ def get_bounds(mesh):
     normals = cell_normals
 
     # Tolleranza per considerare due normali "uguali" (più piccolo = più severo)
-    tolerance = np.sqrt(2 * (1 - np.cos(np.radians(10))))  # Tolleranza per angolo di 10 gradi (Distanza euclidea)
-    threshold = np.cos(np.radians(10)) # Tolleranza per angolo di 10 gradi (Prodotto scalare)
+    tolerance = np.sqrt(2 * (1 - np.cos(np.radians(8))))  # Tolleranza per angolo di 10 gradi (Distanza euclidea)
+    threshold = np.cos(np.radians(8)) # Tolleranza per angolo di 10 gradi (Prodotto scalare)
 
     # Etichettatura per le regioni piatte
     flat_regions = np.full(mesh.n_cells, -1, dtype=int)  # -1 significa non assegnato
@@ -835,9 +836,9 @@ def get_bounds(mesh):
 
     # Aggiungi i dati della regione alla mesh
     mesh.cell_data["ModelFaceID"] = flat_regions + 1
-    # mesh.plot(scalars="ModelFaceID", cmap="viridis")
+    mesh.plot(scalars="ModelFaceID", cmap="viridis")
     regions, counts = np.unique(flat_regions, return_counts=True)
-    # print("Regions and their sizes:", list(zip(regions.tolist(), counts.tolist())))
+    print("Regions and their sizes:", list(zip(regions.tolist(), counts.tolist())))
 
     # Check if any regions were found
     if len(regions) == 0:
@@ -896,7 +897,7 @@ def get_bounds(mesh):
             # print(f"Region {region_id}: Area = {region_area}, Perimeter = {perimeter}")
 
             circularity = 4 * np.pi * region_area / (perimeter ** 2)
-            # print(f"Region {region_id} circularity score: {circularity:.3f}")
+            print(f"Region {region_id} circularity score: {circularity:.3f}")
 
             if 0.9 < circularity < 1.1:  # Circular region
                 if inflow_region is None:
@@ -1039,47 +1040,78 @@ def get_bounds(mesh):
     print('Done')
     return mesh_inflow_poly, mesh_outflow_poly, mesh_walls_poly, mesh
 
+# def write_motion(displacement, time, face, surf, name):
+#     N_nodes = face.n_points
+#     N_frames = time.shape[0]
+#     N_vectors = displacement.shape[1]
+#
+#     # Crea un dizionario che mappa ID -> indice
+#     id_array = surf.point_data["GlobalNodeID"]
+#     id_to_index = {id_: i for i, id_ in enumerate(id_array)}
+#
+#     # Funzione per ottenere i dati per un dato ID
+#     def get_vertex_data_by_id(vertex_id):
+#         index = id_to_index.get(vertex_id)
+#         if index is None:
+#             raise ValueError(f"L'ID {vertex_id} non è presente.")
+#         return displacement[index, :, :]  # restituisce una matrice 3xT (x,y,z nel tempo)
+#
+#     # face_id = face.cell_data["ModelFaceID"][0]
+#     with open(f"{name}_displacement.dat", "w") as f:
+#         # Riga 1: numero nodi e numero frame
+#         f.write(f"{N_vectors} {N_frames} {N_nodes}\n")
+#
+#         for t in range(N_frames):
+#             time_val = time[t] / 1000
+#             f.write(f"{time_val:.6f}\n")
+#
+#         # Per ogni frame temporale
+#         for i in range(N_nodes):
+#             # Recupero coordinate iniziali
+#             vertex_id = face.point_data["GlobalNodeID"][i]
+#             f.write(f"{vertex_id}\n")
+#
+#             # Scrittura delle coordinate aggiornate
+#             for t in range(N_frames):
+#                 dx, dy, dz = get_vertex_data_by_id(vertex_id)[:, t]
+#                 # x_disp = x + dx
+#                 # y_disp = y + dy
+#                 # z_disp = z + dz
+#                 f.write(f"{dx:.6e} {dy:.6e} {dz:.6e}\n")
+#
+#     print(f"Displacement saved to {name}_displacement.dat")
+#     return
+
 def write_motion(displacement, time, face, surf, name):
     N_nodes = face.n_points
     N_frames = time.shape[0]
     N_vectors = displacement.shape[1]
 
-    # Crea un dizionario che mappa ID -> indice
     id_array = surf.point_data["GlobalNodeID"]
+    face_ids = face.point_data["GlobalNodeID"]
     id_to_index = {id_: i for i, id_ in enumerate(id_array)}
 
-    # Funzione per ottenere i dati per un dato ID
-    def get_vertex_data_by_id(vertex_id):
-        index = id_to_index.get(vertex_id)
-        if index is None:
-            raise ValueError(f"L'ID {vertex_id} non è presente.")
-        return displacement[index, :, :]  # restituisce una matrice 3xT (x,y,z nel tempo)
+    # Precompute indices and displacements
+    indices = np.array([id_to_index[vid] for vid in face_ids])
+    selected_disp = displacement[indices, :, :].transpose(0, 2, 1)  # (N_nodes, T, 3)
 
-    # face_id = face.cell_data["ModelFaceID"][0]
     with open(f"{name}_displacement.dat", "w") as f:
-        # Riga 1: numero nodi e numero frame
+        # Header
         f.write(f"{N_vectors} {N_frames} {N_nodes}\n")
+        f.write("\n".join(f"{t/1000:.6f}" for t in time) + "\n")
 
-        for t in range(N_frames):
-            time_val = time[t] / 1000
-            f.write(f"{time_val:.6f}\n")
-
-        # Per ogni frame temporale
-        for i in range(N_nodes):
-            # Recupero coordinate iniziali
-            vertex_id = face.point_data["GlobalNodeID"][i]
+        # Data
+        for i, vertex_id in enumerate(face_ids):
             f.write(f"{vertex_id}\n")
-
-            # Scrittura delle coordinate aggiornate
-            for t in range(N_frames):
-                dx, dy, dz = get_vertex_data_by_id(vertex_id)[:, t]
-                # x_disp = x + dx
-                # y_disp = y + dy
-                # z_disp = z + dz
-                f.write(f"{dx:.6e} {dy:.6e} {dz:.6e}\n")
+            frame_lines = [f"{dx:.6e} {dy:.6e} {dz:.6e}"
+                           for dx, dy, dz in selected_disp[i]]
+            f.write("\n".join(frame_lines) + "\n")
 
     print(f"Displacement saved to {name}_displacement.dat")
-    return
+
+
+
+
 import gmsh
 
 def cylinder (R_cyl=5, H_cyl=60, lc=1.0):
@@ -1499,3 +1531,38 @@ if __name__ == "__main__":
         for t, q in zip(t3.flatten() / 1000, -Q_out):
             # Convert q to a scalar and write to file
             f.write(f"{t:.7f} {q:.7f}\n")
+
+def nearest_multiple(target, min_div=30, max_div=40):
+    best_val = None
+    min_diff = float('inf')
+    best_n = None
+
+    for n in range(min_div, max_div + 1):
+        m = round(target / n) * n
+        diff = abs(m - target)
+        if diff < min_diff:
+            best_val = m
+            min_diff = diff
+            best_n = n
+
+    return best_val, best_n, min_diff
+
+
+def extract_surface_region_from_old(new_mesh, old_surface, distance_threshold=0.2):
+    """
+    Estrae dalla nuova mesh la regione di superficie che si trova a distanza < threshold
+    dalla vecchia superficie (anche se curva).
+    """
+    # Calcola distanza implicita da ogni punto della nuova mesh alla vecchia superficie
+    new_with_dist = new_mesh.compute_implicit_distance(old_surface)
+    dist = np.abs(new_with_dist.point_data['implicit_distance'])
+
+    # Seleziona punti vicini
+    close_pts = dist < distance_threshold
+
+    # Estrai regione corrispondente
+    region = new_mesh.extract_points(close_pts, adjacent_cells=False)
+
+    # Connettività: prendi solo la componente principale
+    region = region.connectivity().threshold(0)
+    return region.extract_surface()
