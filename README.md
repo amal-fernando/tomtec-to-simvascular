@@ -1,7 +1,7 @@
 # SimVascular Input Automation from TomTec Echocardiography Data
 
 ## Overview
-This project automates the preparation of input files for SimVascular simulations using 4D echocardiographic data exported from TomTec. It streamlines the conversion, preprocessing, and formatting steps to enable patient-specific cardiovascular computational fluid dynamics (CFD) simulations.
+This project automates the preparation of input files for SimVascular simulations using 4D echocardiographic data exported from TomTec RV Function software. It streamlines the conversion, preprocessing, and formatting steps to enable patient-specific cardiovascular computational fluid dynamics (CFD) simulations with SimVascular FSI software.
 
 ## Features
 - Converts raw TomTec echocardiographic data into simulation-ready formats
@@ -9,10 +9,9 @@ This project automates the preparation of input files for SimVascular simulation
 - Facilitates reproducible and efficient CFD workflow for cardiovascular research
 
 ## Requirements
-- Python 3.8 or higher
-- 
+- See environment.yml file
 
 ## Installation
 1. Clone the repository:
    ```bash
-   git clone
+   git clone https://github.com/amal-fernando/tomtec-to-simvascular
