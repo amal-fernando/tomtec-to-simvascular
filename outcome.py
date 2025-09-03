@@ -61,6 +61,11 @@ inlet_pressures = []
 outlet_pressures = []
 inlet_flows = []
 outlet_flows = []
+ke_totals = []
+ke_means = []
+vort_means = []
+vort_peaks = []
+wss_means = []
 
 for i, (vtu_path, inlet_path, outlet_path) in enumerate(zip(vtu_files, inlet_files, outlet_files)):
     print(f"Processing timestep {i+1}...")
@@ -106,6 +111,51 @@ for i, (vtu_path, inlet_path, outlet_path) in enumerate(zip(vtu_files, inlet_fil
     # === PORTATA su outlet ===
     outlet_flow = compute_flow_rate(outlet)
 
+    # === CARICA IL VOLUME COMPLETO ===
+    vol_mesh = pv.read(vtu_path)
+
+    # --- Energia cinetica ---
+    if "Velocity" in vol_mesh.point_data:
+        vel = vol_mesh.point_data["Velocity"]
+        ke_pt = 0.5 * 1060 * np.sum(vel**2, axis=1)  # J/m^3
+        ke_mean = np.mean(ke_pt)
+        ke_total = ke_mean * vol_mesh.volume
+    else:
+        ke_mean = np.nan
+        ke_total = np.nan
+    ke_means.append(ke_mean)
+    ke_totals.append(ke_total)
+
+    # --- Vorticità ---
+    try:
+        curl = vol_mesh.compute_derivative(scalars="Velocity", gradient=False,
+                                           vector=True, divergence=False).point_data["curl"]
+        vort_mag = np.linalg.norm(curl, axis=1)
+        vort_means.append(np.mean(vort_mag))
+        vort_peaks.append(np.max(vort_mag))
+        vol_mesh.point_data["Vorticity"] = vort_mag  # opzionale: salva per esportare .vtu
+    except Exception as e:
+        vort_means.append(np.nan)
+        vort_peaks.append(np.nan)
+
+    # --- WSS (stima semplificata) ---
+    try:
+        surf = vol_mesh.extract_surface().compute_normals()
+        grad = vol_mesh.compute_derivative(scalars="Velocity", gradient=True).point_data["Velocity_gradient"]
+        G = grad.reshape(-1, 3, 3)
+        n = surf.point_normals
+        mu = 3.5e-3  # viscosità Pa·s
+        wss_vals = []
+        for gi, ni in zip(G, n):
+            sym = gi + gi.T
+            P = np.eye(3) - np.outer(ni, ni)
+            tau = mu * (P @ sym @ ni)
+            wss_vals.append(np.linalg.norm(tau))
+        wss_means.append(np.mean(wss_vals))
+    except Exception as e:
+        wss_means.append(np.nan)
+
+
 
     # Salva dati
     inlet_pressures.append(inlet_avg_pressure)
@@ -119,9 +169,15 @@ df = pd.DataFrame({
     "inlet_pressure": inlet_pressures,
     "outlet_pressure": outlet_pressures,
     "inlet_flow": inlet_flows,
-    "outlet_flow": outlet_flows
+    "outlet_flow": outlet_flows,
+    "KE_total": ke_totals,
+    "KE_mean": ke_means,
+    "Vorticity_mean": vort_means,
+    "Vorticity_peak": vort_peaks,
+    "WSS_mean": wss_means
 })
-df.to_csv("pressures.csv", index=False)
+df.to_csv("extended_results.csv", index=False)
+print("Saved extended results to 'extended_results.csv'")
 
 # === PLOT ===
 plt.plot(df["time"], df["inlet_pressure"], label="Inlet")

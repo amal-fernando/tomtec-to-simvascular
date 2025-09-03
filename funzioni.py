@@ -396,7 +396,7 @@ def timeplot(v, f):
     pl.add_key_event('Right', next_frame)
     pl.add_key_event('Left', prev_frame)
     pl.add_key_event('Escape', stop_application)
-
+    pl.add_mesh(pv.PolyData(mesh_matrix[:, :, 0], faces), style="wireframe")
     # Add instructions
     pl.add_text(
         'Controls:\nSpace: Play/Pause\nLeft/Right: Previous/Next Frame\nEsc: Stop Animation',
@@ -607,7 +607,7 @@ import numpy as np
 import pyvista as pv
 import meshio
 
-def mmg_remesh(input_mesh, hausd=0.3, hmax=2, hmin=1.5, ar=30, max_aspect_ratio=None, max_iter=3, verbose=False):
+def mmg_remesh(input_mesh, hausd=0.3, hmax=2, hmin=1.5, ar=30, max_aspect_ratio=None, max_iter=5, verbose=False):
     #crea un idetificatore univoco per la mesh
     mesh_id = os.getpid()
     input_mesh.clear_data()
@@ -1473,15 +1473,31 @@ def flow(V, t, plot_save_path=None, show=False):
     # def softplus(x, beta=0.2):  # Softplus
     #     return np.log(1 + np.exp(beta * x)) / beta  # beta = 1: molto morbido, beta = 10 # raccordo visibile ma più netto, beta = 20–50: quasi come ReLU, ma ancora smooth
 
-    def softplus(x, beta=0.0002):  # Softplus
-        return np.logaddexp(0, x * beta)/beta   # Softplus function
+    # def softplus(x, beta=0.0002):  # Softplus
+    #     return np.logaddexp(0, x * beta)/beta   # Softplus function
+    #
+    #
+    # Q_in = softplus(dV_dt)  # Inflow: softplus per evitare valori negativi
+    # Q_out = -softplus(-dV_dt)  # Outflow: softplus negativo per evitare valori negativi
+
+    Q_in = np.zeros(len(dV_dt))
+    Q_out = np.zeros(len(dV_dt))
+    for i in range(len(dV_dt)):
+        if dV_dt[i]>=0:
+            Q_in[i] = dV_dt[i]
+        else:
+            Q_out[i] = dV_dt[i]
 
 
-    Q_in = softplus(dV_dt)  # Inflow: softplus per evitare valori negativi
-    Q_out = -softplus(-dV_dt)  # Outflow: softplus negativo per evitare valori negativi
+    def smooth(x, window_len=5):
+        kernel = np.ones(window_len) / window_len
+        return np.convolve(x, kernel, mode='same')
 
-    Q_in = savgol_filter(Q_in, window_length=31, polyorder=3)
-    Q_out = savgol_filter(Q_out, window_length=31, polyorder=3)
+    Q_in = smooth(np.abs(Q_in), window_len=20)
+    Q_out = -smooth(np.abs(Q_out), window_len=20)
+
+    # Q_in = savgol_filter(Q_in, window_length=31, polyorder=3)
+    # Q_out = savgol_filter(Q_out, window_length=31, polyorder=3)
 
     # Visualizza i risultati
     plt.figure(figsize=(12, 6))

@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import filedialog, simpledialog
 import numpy as np
 from funzioni import riordina, timeplot, resample_u, pv_to_np, np_to_pv, write_motion
-from funzioni import volume, normalplot, mmg_remesh, mesh_quality, get_bounds, nearest_multiple
+from funzioni import volume, normalplot, mmg_remesh, mesh_quality, nearest_multiple
 from funzioni import fourier
 import matplotlib
 matplotlib.use('TkAgg')  # Use TkAgg backend instead of Qt
@@ -104,7 +104,7 @@ if start_index is None:
 #     filetypes=[("Text files", "*.txt")]
 # )
 
-pv.global_theme.allow_empty_mesh = True
+# pv.global_theme.allow_empty_mesh = True
 
 for file_path in header_files_path[start_index:]:
     if not os.path.exists(file_path):
@@ -186,8 +186,8 @@ for file_path in header_files_path[start_index:]:
 
     # Create a save path for the mesh
     plot_save_path = subfolders[2]
-    show = False  # Flag to control whether to show the plot or not
-    test = False  # Flag to control whether to perform cubic and linear interpolation
+    show = True  # Flag to control whether to show the plot or not
+    test = True  # Flag to control whether to perform cubic and linear interpolation
     #==============================================================================
     # 3. Load the .ucd files and extract node coordinates and triangle connectivity
     #==============================================================================
@@ -228,8 +228,8 @@ for file_path in header_files_path[start_index:]:
     # np.save('f_orig.npy', f0) # Save the original connectivity
     # np.save('time.npy', t0) # Save the time vector
 
-    # timeplot(v0,f0) # plot della mesh rada nel tempo \decommentare
-    normalplot(v0, f0, 1, os.path.join(radice_dataset[:-1], "plots", "normalplot_coarse.obj"), show=False) # plot delle normali alla mesh rada \decommentare
+    timeplot(v0,f0) # plot della mesh rada nel tempo \decommentare
+    normalplot(v0, f0, 1, os.path.join(radice_dataset[:-1], "plots", "normalplot_coarse.obj"), show) # plot delle normali alla mesh rada \decommentare
 
     vol = volume(v0, f0)/1000  # Calculate the volume of the coarse mesh in mL
     if test:
@@ -342,6 +342,24 @@ for file_path in header_files_path[start_index:]:
     # mesh.save("coarse_mesh.vtp")  # Save the coarse mesh for reference
     avg,_,_ = mesh_quality(mesh)
 
+    inflow = np.load("inflow.npy", allow_pickle=True)
+    outflow = np.load("outflow.npy", allow_pickle=True)
+
+    inlet_mesh = mesh.extract_cells(inflow).extract_surface()
+    outlet_mesh = mesh.extract_cells(outflow).extract_surface()
+
+    boundary_cells = np.concatenate([inflow, outflow])
+
+    all_cells = np.arange(mesh.n_cells)
+    wall_cells = np.setdiff1d(all_cells, boundary_cells)
+
+    wall_mesh = mesh.extract_cells(wall_cells)
+
+    p = pv.Plotter()
+    p.add_mesh(wall_mesh, 'lightgrey', lighting=True, show_edges=True)
+    p.show()
+
+
     if avg['aspect_ratio'] > 1.5 or avg['radius_ratio'] > 1.5:
         print("The mesh quality is poor.")
         print("Remeshing should be done.")
@@ -358,6 +376,12 @@ for file_path in header_files_path[start_index:]:
         # hausd = avg_edge  # Use this instead of a hardcoded 0.3
         remesh = mmg_remesh(mesh, hausd=0.1, verbose=True) # Remesh the mesh using MMG
 
+        ### TEST ###
+        # inlet_remesh = mmg_remesh(inlet_mesh, hausd=0.1, verbose=True) # Remesh the inlet mesh using MMG
+        # outlet_remesh = mmg_remesh(outlet_mesh, hausd=0.1, verbose=True)
+        # wall_remesh = mmg_remesh(wall_mesh, hausd=0.1, ar=10, max_aspect_ratio=3, verbose=True) # Remesh the outlet mesh using MMG
+        # remesh = inlet_remesh.merge([outlet_remesh, wall_remesh], merge_points=True, tolerance=1e-6)
+        #
         avg, _, _ = mesh_quality(remesh)
 
         if avg['aspect_ratio'] > 1.5 or avg['radius_ratio'] > 1.5:
@@ -371,9 +395,18 @@ for file_path in header_files_path[start_index:]:
         remesh = remesh.triangulate() # Ensure the remeshed mesh is triangulated
         vert, fac = pv_to_np(remesh)  # Convert remeshed mesh to numpy arrays
         vert = vert[:, :, np.newaxis]
-        normalplot(vert, fac, 0, os.path.join(radice_dataset[:-1], "plots", "normalplot_fine.obj"), show=False)  # Plot the normals of the remeshed mesh
+        normalplot(vert, fac, 0, os.path.join(radice_dataset[:-1], "plots", "normalplot_fine.obj"), show)  # Plot the normals of the remeshed mesh
     else:
         remesh = mesh.triangulate() # Ensure the mesh is triangulated
+
+
+    ### TEST ###
+    # p = pv.Plotter()
+    # # p.add_mesh(remesh, 'lightgrey', lighting=True, show_edges=True)
+    # p.add_mesh(inlet_remesh, 'blue', lighting=True, show_edges=True, label='Inlet', opacity=0.5)
+    # p.add_mesh(outlet_remesh, 'red', lighting=True, show_edges=True, label='Outlet', opacity=0.5)
+    # p.add_mesh(wall_remesh, 'green', lighting=True, show_edges=True, label='Wall', opacity=0.5)
+    # p.show()
 
     # Compute the average edge length of the remeshed surface
     edges = remesh.extract_all_edges()
@@ -398,14 +431,14 @@ for file_path in header_files_path[start_index:]:
     # Convert to PyVista mesh
     grid = tet.grid
 
-    # grid.plot(show_edges=True)
+    grid.plot(show_edges=True)
 
     # get cell centroids
     cells = grid.cells.reshape(-1, 5)[:, 1:]
     cell_center = grid.points[cells].mean(1)
 
     # extract cells below the 0 xy plane
-    mask = cell_center[:, 2] < 0
+    mask = cell_center[:, 2] < (np.mean(cell_center[:,2]))
     cell_ind = mask.nonzero()[0]
     subgrid = grid.extract_cells(cell_ind)
 
@@ -417,6 +450,7 @@ for file_path in header_files_path[start_index:]:
                         [' Tessellated Mesh ', 'black']])
     # plotter.export_gltf(os.path.join(radice_dataset[:-1], "plots", "volume.glb"))
     # plotter.save_graphic(os.path.join(radice_dataset[:-1], "plots", "volume.pdf"))
+    # plotter.show()
     plotter.close() # plotter.show() # Show the plotter window
 
     # Save as VTU
@@ -452,7 +486,7 @@ for file_path in header_files_path[start_index:]:
     # p.add_mesh(surface, color='lightgrey', show_edges=True, label='Surface', opacity=0.5)
     p.add_legend()
     if plot_save_path is not None:
-        plt.savefig(os.path.join(plot_save_path, "boundary.png"))
+        p.save_graphic(os.path.join(plot_save_path, "boundary.svg"))
         print(f'Mesh saved to {plot_save_path}')
     if show:
         p.show()
@@ -527,7 +561,7 @@ for file_path in header_files_path[start_index:]:
     #===========================================================
 
     # num_intermedie = 4  # Number of intermediate frames to insert between each original frame
-    dt = 1 # Time step size for the new frames
+    dt = 1 # Time step size for the new frames [ms]
     t3 = np.arange(t2[0], t2[-1] + dt, dt)  # New time vector with the desired time step
     if t3[-1] > t2[-1] and not np.isclose(t3[-1], t2[-1]):
         t3 = t3[:-1]  # Remove the last time point if it exceeds the original end time
@@ -574,8 +608,8 @@ for file_path in header_files_path[start_index:]:
     plt.figure()
     plt.plot(t2,volume(v3,f1)/1000, '*', label='volOriginal')
     if test:
-        plt.plot(t3,volume(v_cubic, f1), label='volCubic')
-        plt.plot(t3,volume(v_linear, f1), label='volLinear')
+        plt.plot(t3,volume(v_cubic, f1)/1000, label='volCubic')
+        plt.plot(t3,volume(v_linear, f1)/1000, label='volLinear')
     plt.plot(t3,volume(v_pchip, f1)/1000, label='volPchip')
     plt.plot(t3,V/1000, label='volFourier')
     plt.legend()
@@ -731,10 +765,10 @@ for file_path in header_files_path[start_index:]:
     Spectral radius of infinite time step: 0.50
     Searched file name to trigger stop: STOP_SIM
     
-    #Save results in folder: {radice_dataset[:-1]} 
+    Save results in folder: simulation
     Save results to VTK format: 1
     Name prefix of saved VTK files: result
-    Increment in saving VTK files: {increment}
+    Increment in saving VTK files: {increment//dt}
     Start saving after time step: 1
     Increment in saving restart files: 50
     Convert BIN to VTK format: 0
@@ -759,7 +793,7 @@ for file_path in header_files_path[start_index:]:
        Add face: lumen_outlet {{
           Face file path: /global-scratch/bulk_pool/afernando/Docker/{radice_dataset[:-1]}/mesh/mesh-surfaces/outlet.vtp
        }}
-       Initial pressures file path: /global-scratch/bulk_pool/afernando/Docker/{radice_dataset[:-1]}/pressure_100.vtu
+       Initial pressures file path: /global-scratch/bulk_pool/afernando/Docker/{radice_dataset[:-1]}/pressure/pressure_100.vtu
        Domain: 1
     }}
     
@@ -911,7 +945,7 @@ for file_path in header_files_path[start_index:]:
     Spectral radius of infinite time step: 0.50
     Searched file name to trigger stop: STOP_SIM
     
-    #Save results in folder: {radice_dataset[:-1]} 
+    Save results in folder: pressure
     Save results to VTK format: 1
     Name prefix of saved VTK files: pressure
     Increment in saving VTK files: 100
@@ -1007,5 +1041,7 @@ for file_path in header_files_path[start_index:]:
     end_time = time.time()  # ⏱️
 
     print(f"Script completed successfully in {end_time - start_time:.2f} seconds.")
+
+    plt.close('all')  # Close all matplotlib plots
 
 print("Done")
