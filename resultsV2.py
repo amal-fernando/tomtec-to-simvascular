@@ -7,6 +7,8 @@ from tqdm.auto import tqdm
 from concurrent.futures import ProcessPoolExecutor
 import time
 
+'''This script processes a series of VTU files to extract inlet and outlet surfaces based on predefined masks.'''
+
 def process_file(i, radice_dataset, multiplier, path_str, inletIDs, outletIDs, boundary_result_path_str):
     import pyvista as pv
     from pathlib import Path
@@ -46,7 +48,7 @@ if __name__ == "__main__":
     base_name = file_path.name
     radice_dataset = base_name[:-7]
     multiplier = int(base_name[len(radice_dataset):-4])
-    boundary_result_path = path / "boundary_result"
+    boundary_result_path = path / "boundary_simulation"
     boundary_result_path.mkdir(exist_ok=True)
 
     # Conteggio file

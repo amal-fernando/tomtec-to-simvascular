@@ -44,12 +44,14 @@ path = file_path.parent
 base_name = file_path.name
 radice_dataset = base_name[:-7]
 multiplier = int(base_name[len(radice_dataset):-4])
-boundary_result_path = path / "boundary_result"
+boundary_result_path = path / "boundary_simulation"
 boundary_result_path.mkdir(exist_ok=True)
 vtu_files = sorted(glob.glob(os.path.join(path, "result_*.vtu")),
                    key=extract_number)
 inlet_files = sorted(glob.glob(os.path.join(boundary_result_path, "result_inlet_*.vtp")), key=extract_number)
 outlet_files = sorted(glob.glob(os.path.join(boundary_result_path, "result_outlet_*.vtp")), key=extract_number)
+save_path = path.parent / "results"
+save_path.mkdir(exist_ok=True)
 
 time_values = []
 for f in vtu_files:
@@ -65,7 +67,10 @@ ke_totals = []
 ke_means = []
 vort_means = []
 vort_peaks = []
-wss_means = []
+wss_means = [] # non serve
+# tubulent kintetik energy
+# energy loss
+
 
 for i, (vtu_path, inlet_path, outlet_path) in enumerate(zip(vtu_files, inlet_files, outlet_files)):
     print(f"Processing timestep {i+1}...")
@@ -116,10 +121,10 @@ for i, (vtu_path, inlet_path, outlet_path) in enumerate(zip(vtu_files, inlet_fil
 
     # --- Energia cinetica ---
     if "Velocity" in vol_mesh.point_data:
-        vel = vol_mesh.point_data["Velocity"]
+        vel = vol_mesh.point_data["Velocity"]/1000 # mm/s --> m/s
         ke_pt = 0.5 * 1060 * np.sum(vel**2, axis=1)  # J/m^3
         ke_mean = np.mean(ke_pt)
-        ke_total = ke_mean * vol_mesh.volume
+        ke_total = ke_mean * abs(vol_mesh.volume*1e-9)  # J (volume in mm^3 --> m^3)
     else:
         ke_mean = np.nan
         ke_total = np.nan
@@ -128,31 +133,26 @@ for i, (vtu_path, inlet_path, outlet_path) in enumerate(zip(vtu_files, inlet_fil
 
     # --- Vorticità ---
     try:
-        curl = vol_mesh.compute_derivative(scalars="Velocity", gradient=False,
-                                           vector=True, divergence=False).point_data["curl"]
-        vort_mag = np.linalg.norm(curl, axis=1)
+        vorticity_vector = vol_mesh.point_data['Vorticity']
+        # 2. Calcola la magnitudine (norma) del vettore per ogni punto
+        vort_mag = np.linalg.norm(vorticity_vector, axis=1)
+        # 3. Aggiungi media e picco alle liste
         vort_means.append(np.mean(vort_mag))
         vort_peaks.append(np.max(vort_mag))
-        vol_mesh.point_data["Vorticity"] = vort_mag  # opzionale: salva per esportare .vtu
-    except Exception as e:
+    except KeyError:
+        # Se il campo 'Vorticity' non esiste in un file, gestisci l'errore
+        print("Attenzione: campo 'Vorticity' non trovato. Imposto NaN.")
         vort_means.append(np.nan)
         vort_peaks.append(np.nan)
 
     # --- WSS (stima semplificata) ---
     try:
-        surf = vol_mesh.extract_surface().compute_normals()
-        grad = vol_mesh.compute_derivative(scalars="Velocity", gradient=True).point_data["Velocity_gradient"]
-        G = grad.reshape(-1, 3, 3)
-        n = surf.point_normals
-        mu = 3.5e-3  # viscosità Pa·s
-        wss_vals = []
-        for gi, ni in zip(G, n):
-            sym = gi + gi.T
-            P = np.eye(3) - np.outer(ni, ni)
-            tau = mu * (P @ sym @ ni)
-            wss_vals.append(np.linalg.norm(tau))
+        surf = vol_mesh.extract_surface()
+        if "WSS" in surf.point_data:
+            wss_vector = surf.point_data["WSS"]
+            wss_vals = np.linalg.norm(wss_vector, axis=1)
         wss_means.append(np.mean(wss_vals))
-    except Exception as e:
+    except KeyError:
         wss_means.append(np.nan)
 
 
@@ -176,7 +176,7 @@ df = pd.DataFrame({
     "Vorticity_peak": vort_peaks,
     "WSS_mean": wss_means
 })
-df.to_csv("extended_results.csv", index=False)
+df.to_csv(save_path / "extended_results.csv", index=False)
 print("Saved extended results to 'extended_results.csv'")
 
 # === PLOT ===
@@ -187,7 +187,7 @@ plt.ylabel("Average Pressure")
 plt.legend()
 plt.grid(True)
 plt.title("Pressure over time")
-plt.savefig("pressure_over_time.png")
+plt.savefig(save_path / "pressure_over_time.png")
 plt.show()
 
 plt.plot(df["time"], df["inlet_flow"], label="Inlet Flow")
@@ -197,7 +197,7 @@ plt.ylabel("Flow Rate (mL/s)")
 plt.legend()
 plt.grid(True)
 plt.title("Flow Rate over time")
-plt.savefig("flow_rate_over_time.png")
+plt.savefig(save_path / "flow_rate_over_time.png")
 plt.show()
 
 print("Processing complete. Results saved to 'pressures.csv' and 'pressure_over_time.png'.")
@@ -249,7 +249,7 @@ for i in range(cycles):
 
 # --- Salva in CSV ---
 df_metrics = pd.DataFrame(metrics)
-df_metrics.to_csv("cycle_comparison_metrics.csv", index=False)
+df_metrics.to_csv(save_path / "cycle_comparison_metrics.csv", index=False)
 print("Metriche di periodicità salvate in 'cycle_comparison_metrics.csv'.")
 
 
@@ -302,7 +302,7 @@ for name, data_list in [("Inlet Pressure", inlet_pressures),
 
 # Salva risultati
 df_pointwise = pd.DataFrame(pointwise_metrics)
-df_pointwise.to_csv("pointwise_cycle_metrics.csv", index=False)
+df_pointwise.to_csv(save_path / "pointwise_cycle_metrics.csv", index=False)
 print("Salvati RMSE e errori puntuali per timestep in 'pointwise_cycle_metrics.csv'.")
 
 # Plot RMSE e percentuali per ogni variabile
@@ -318,7 +318,7 @@ for var in df_pointwise["Variable"].unique():
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig(f"pointwise_errors_{var.replace(' ', '_').lower()}.png")
+    plt.savefig(save_path / f"pointwise_errors_{var.replace(' ', '_').lower()}.png")
     plt.show()
 
 
@@ -361,7 +361,7 @@ df_peak = pd.DataFrame({
     "OutletPressure_at_peak_idx": values_at_peak_outlet,
     "Pct_Error_vs_mean": pct_errors
 })
-df_peak.to_csv("peak_outlet_pressure_errors.csv", index=False)
+df_peak.to_csv(save_path / "peak_outlet_pressure_errors.csv", index=False)
 print("Salvato errore percentuale al picco di outlet pressure in 'peak_outlet_pressure_errors.csv'.")
 
 
@@ -393,7 +393,7 @@ for ax, (title, data) in zip(axs, variables):
 
 axs[-1].set_xlabel("Time step nel ciclo")
 plt.tight_layout()
-plt.savefig("cycle_differences.png")
+plt.savefig(save_path / "cycle_differences.png")
 plt.show()
 
 import seaborn as sns
@@ -425,7 +425,9 @@ for metric in metric_types:
                     square=True, cbar_kws={'label': metric})
         plt.title(f"{metric} Heatmap – {var}")
         plt.tight_layout()
-        fname = f"heatmap_{metric.lower()}_{var.replace(' ', '_').lower()}.png"
+        fname = save_path / f"heatmap_{metric.lower()}_{var.replace(' ', '_').lower()}.png"
         plt.savefig(fname)
         plt.show()
         print(f"Saved heatmap: {fname}")
+
+print('All done!')
