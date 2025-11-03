@@ -374,7 +374,7 @@ for file_path in header_files_path[start_index:]:
         # edges = mesh.extract_all_edges().compute_cell_sizes()
         # avg_edge = edges['Length'].mean()
         # hausd = avg_edge  # Use this instead of a hardcoded 0.3
-        remesh = mmg_remesh(mesh, hausd=0.1, verbose=True) # Remesh the mesh using MMG
+        remesh = mmg_remesh(mesh, hausd=0.1, hmax=2.5, hmin=2 ,verbose=True) # Remesh the mesh using MMG
 
         ### TEST ###
         # inlet_remesh = mmg_remesh(inlet_mesh, hausd=0.1, verbose=True) # Remesh the inlet mesh using MMG
@@ -933,7 +933,7 @@ for file_path in header_files_path[start_index:]:
     with open(os.path.join(radice_dataset[:-1], f"{radice_dataset[:-1]}_fsi.inp" ), "w") as file:
         file.write(config_text)
 
-    # e. Generete the pressure.inp file for the initial pressuresù
+    # e. Generete the pressure.inp file for the initial pressures
     pressure_text = f"""\
     #----------------------------------------------------------------
     # General simulation parameters

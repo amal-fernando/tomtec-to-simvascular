@@ -7,7 +7,7 @@ import glob
 import os
 import re
 from pathlib import Path
-from tkinter import filedialog, Tk, filedialog, simpledialog
+from tkinter import Tk, filedialog, simpledialog, Checkbutton, BooleanVar, Button
 from scipy.stats import pearsonr
 from tqdm import tqdm
 import seaborn as sns
@@ -21,20 +21,56 @@ matplotlib.use('TkAgg')
 # =============================================================================
 # 💡 IMPOSTA QUESTI VALORI PRIMA DI ESEGUIRE LO SCRIPT
 RHO_BLOOD = 1060  # Densità del sangue in kg/m^3
-MU_BLOOD = 0.004  # Vicosità del sangue Pa·s
+MU_BLOOD = 0.004  # Viscosità del sangue Pa·s
 PA_TO_MMHG = 133.322  # Fattore di conversione da Pascal a mmHg
 CYCLES = 3  # Numero di cicli cardiaci nella simulazione
 SIMULATION_TIME_STEP = 0.001  # IMPORTANTE: Imposta la durata di un timestep in secondi (es. 1 ms = 0.001 s)
 
-
-FLAG_FLOW = True  # Se True, calcola portate e metriche correlate
-FLAG_PRESSURE = True  # Se True, calcola pressioni e metriche correlate
-FLAG_VOLUME = True  # Se True, calcola volumi e metriche correlate
-FLAG_KE = True  # Se True, calcola energia cinetica e metriche correlate
-FLAG_VORTICITY = True  # Se True, calcola vorticità e metriche correlate
-FLAG_ENERGY_LOSS = True  # Se True, calcola perdite di energia viscosa e metriche correlate
-
 '''N.B. Le normali alle superfici dei file di simulazione sono orientate verso l'interno del dominio fluido.'''
+
+# =============================================================================
+# --- FINESTRA DI SELEZIONE FLAG ---
+# =============================================================================
+def select_flags():
+    root = Tk()
+    root.title("Seleziona i FLAG da attivare")
+
+    flag_vars = {
+        "FLAG_FLOW": BooleanVar(value=True),
+        "FLAG_PRESSURE": BooleanVar(value=True),
+        "FLAG_VOLUME": BooleanVar(value=True),
+        "FLAG_KE": BooleanVar(value=True),
+        "FLAG_VORTICITY": BooleanVar(value=True),
+        "FLAG_ENERGY_LOSS": BooleanVar(value=True),
+        "FLAG_HDF": BooleanVar(value=True),
+    }
+
+    for name, var in flag_vars.items():
+        Checkbutton(root, text=name, variable=var).pack(anchor="w")
+
+    done = BooleanVar(value=False)
+
+    def confirm():
+        done.set(True)
+        root.destroy()
+
+    Button(root, text="Conferma", command=confirm).pack(pady=10)
+    root.wait_variable(done)
+
+    return {name: var.get() for name, var in flag_vars.items()}
+
+# Mostra finestra all’avvio
+flags = select_flags()
+
+# Aggiorna i FLAG in base alle scelte utente
+FLAG_FLOW = flags["FLAG_FLOW"]
+FLAG_PRESSURE = flags["FLAG_PRESSURE"]
+FLAG_VOLUME = flags["FLAG_VOLUME"]
+FLAG_KE = flags["FLAG_KE"]
+FLAG_VORTICITY = flags["FLAG_VORTICITY"]
+FLAG_ENERGY_LOSS = flags["FLAG_ENERGY_LOSS"]
+FLAG_HDF = flags["FLAG_HDF"]
+
 # =============================================================================
 # --- FUNZIONI HELPER E DI CALCOLO ---
 # =============================================================================
@@ -178,9 +214,19 @@ def compute_flow_rate(surface: pv.PolyData):
         return np.nan
 
     # Cell wise integration
-    surface = surface.compute_normals(point_normals=False, cell_normals=True, auto_orient_normals=True)
+    surface = surface.compute_normals(point_normals=False, cell_normals=True, auto_orient_normals=False)
     normals = surface.cell_data["Normals"]
     surface_cell = surface.point_data_to_cell_data(pass_point_data=True)
+
+    # centroids = surface.cell_centers().points
+    # # Crea un plotter
+    # p = pv.Plotter()
+    # p.add_mesh(surface, color="lightblue", opacity=0.8)
+    # # Aggiungi le normali come frecce
+    # p.add_arrows(centroids, -surface["Normals"], mag=2)  # mag scala la lunghezza delle frecce
+    # p.add_axes()
+    # p.show()
+
     velocity = surface_cell.cell_data["Velocity"]
     normal_velocity = np.einsum('ij,ij->i', velocity, normals)
     surface_cell["normal_velocity"] = normal_velocity
@@ -208,21 +254,6 @@ def process_timestep(vtu_path, inlet_path, outlet_path, timestep_index):
     inlet_surf = pv.read(inlet_path)
     outlet_surf = pv.read(outlet_path)
 
-    # inlet_surf = inlet_surf.compute_normals(point_normals=True, cell_normals=True, auto_orient_normals=True)
-    # outlet_surf = outlet_surf.compute_normals(point_normals=True, cell_normals=True, auto_orient_normals=True)
-
-    # inlet_centers = inlet_surf.cell_centers().points
-    # outlet_centers = outlet_surf.cell_centers().points
-
-    # p = pv.Plotter()
-    # p.add_mesh(inlet_surf, color="lightgreen", opacity=0.8)
-    # p.add_mesh(outlet_surf, color="lightcoral", opacity=0.8)
-    # p.add_arrows(inlet_centers, inlet_surf.cell_data["Normals"], mag=2)  # mag scala la lunghezza delle frecce
-    # p.add_arrows(outlet_centers, outlet_surf.cell_data["Normals"], mag=2)  # mag scala la lunghezza delle frecce
-    # p.add_arrows(inlet_surf.points, inlet_surf.point_data["Normals"], mag=2)  # mag scala la lunghezza delle frecce
-    # p.add_arrows(outlet_surf.points, outlet_surf.point_data["Normals"], mag=2)  # mag scala la lunghezza delle frecce
-    # p.show()
-
     if timestep_index == 0:
         print("\n--- Informazioni dal primo timestep ---")
         print(f"Dati puntuali disponibili: {inlet_surf.point_data.keys()}")
@@ -234,23 +265,26 @@ def process_timestep(vtu_path, inlet_path, outlet_path, timestep_index):
 
     # Pressione (Pa -> mmHg)
     if FLAG_PRESSURE:
-        metrics['inlet_pressure'] = np.mean(inlet_surf.point_data["Pressure"]) / PA_TO_MMHG if "Pressure" in inlet_surf.point_data else np.nan
-        metrics['outlet_pressure'] = np.mean(outlet_surf.point_data["Pressure"]) / PA_TO_MMHG if "Pressure" in outlet_surf.point_data else np.nan
+        metrics['inlet_pressure_mmHg'] = np.mean(inlet_surf.point_data["Pressure"]) / PA_TO_MMHG if "Pressure" in inlet_surf.point_data else np.nan
+        metrics['outlet_pressure_mmHg'] = np.mean(outlet_surf.point_data["Pressure"]) / PA_TO_MMHG if "Pressure" in outlet_surf.point_data else np.nan
     else:
-        metrics['inlet_pressure'] = np.nan
-        metrics['outlet_pressure'] = np.nan
+        metrics['inlet_pressure_mmHg'] = np.nan
+        metrics['outlet_pressure_mmHg'] = np.nan
 
     # Portata (mm^3/s -> mL/s)
     if FLAG_FLOW:
-        metrics['inlet_flow'] = compute_flow_rate(inlet_surf)
-        metrics['outlet_flow'] = compute_flow_rate(outlet_surf)
+        metrics['inlet_flow_mL_s'] = compute_flow_rate(inlet_surf)
+        metrics['outlet_flow_mL_s'] = compute_flow_rate(outlet_surf)
     else:
-        metrics['inlet_flow'] = np.nan
-        metrics['outlet_flow'] = np.nan
+        metrics['inlet_flow_mL_s'] = np.nan
+        metrics['outlet_flow_mL_s'] = np.nan
 
     # Carica il volume per le metriche volumetriche
     vol_mesh = pv.read(vtu_path)
     vol_mesh.points = vol_mesh.points + vol_mesh.point_data["Displacement"]
+
+    if FLAG_PRESSURE:
+        metrics['volume_pressure_mmHg'] = np.mean(vol_mesh.point_data["Pressure"]) / PA_TO_MMHG if "Pressure" in vol_mesh.point_data else np.nan
 
     # surf = vol_mesh.extract_surface()
     # surf = surf.compute_normals(point_normals=True, cell_normals=False)
@@ -262,53 +296,13 @@ def process_timestep(vtu_path, inlet_path, outlet_path, timestep_index):
     # p.show()
 
     if FLAG_VOLUME:
-        V = -vol_mesh.volume / 1000  # in mL
-        metrics['Volume_mL'] = V
+        V = abs(vol_mesh.volume) / 1000  # in mL
+        metrics['volume_mL'] = V
     else:
-        metrics['Volume_mL'] = np.nan
+        metrics['volume_mL'] = np.nan
 
     # Energia Cinetica (J)
     if "Velocity" in vol_mesh.point_data and FLAG_KE:
-        '''
-        # copia della mesh originale
-        mesh_cells = vol_mesh.copy()
-        mesh_cells.points /= 1000.0
-
-        # 1️⃣ prendi la velocità in m/s (definita per punto)
-        vel_point_m = mesh_cells.point_data["Velocity"] / 1000.0  # mm/s → m/s
-        mesh_cells.point_data["Velocity_m"] = vel_point_m  # definita per punto
-
-        # vel = np.linalg.norm(mesh_cells.point_data["Velocity"], axis=1)
-
-        # 2️⃣ speed^2 per punto (m^2/s^2)
-        speed2_point = np.sum(vel_point_m ** 2, axis=1)  # (Npoints,)
-        mesh_cells.point_data["speed2_m2s2"] = speed2_point
-
-        # v2 = np.array(speed2_point*1e6)
-        # #  imposta come campo vettoriale attivo
-        # mesh_cells.set_active_vectors("Velocity_m")
-
-        # 3️⃣ converti da dati per punto a dati per cella
-        #    → calcola la velocità media per ciascuna cella
-        mesh_cells = mesh_cells.point_data_to_cell_data(pass_point_data=True)
-
-        # 4️⃣ calcola i volumi delle celle
-        mesh_cells = mesh_cells.compute_cell_sizes(length=False, area=False, volume=True)
-        cell_vol_m3 = -mesh_cells.cell_data["Volume"] #* 1e-9  # mm³ → m³
-
-        # 5️⃣ estrai la velocità media per cella
-        # cell_vel = mesh_cells.cell_data["Velocity_m"]
-        speed2_cell = mesh_cells.cell_data["speed2_m2s2"]  # (Ncells,)
-
-        # 6️⃣ calcola KE per cella e totale
-        ke_density_cell = 0.5 * RHO_BLOOD * speed2_cell # np.sum(cell_vel ** 2, axis=1)  # J/m³
-        ke_cell = ke_density_cell * cell_vol_m3  # J
-        KE_total = np.sum(ke_cell) # J
-        KE_mean = KE_total / np.sum(cell_vol_m3)  # J/m3
-        KE_density = np.sum(ke_density_cell)
-        metrics['KE_mean'] = KE_mean
-        metrics['KE_total'] = KE_total
-        '''
         mesh = vol_mesh.copy()
         mesh.points /= 1000.0  # mm → m
 
@@ -323,18 +317,18 @@ def process_timestep(vtu_path, inlet_path, outlet_path, timestep_index):
         # 3️⃣ connettività (nodi di ciascun tetraedro)
         cells = mesh.cells.reshape(-1, 5)[:, 1:5]  # formato [ncell, 4 nodi]
 
-        vel_cell = vel_node[cells]
+        # vel_cell = vel_node[cells]
         # Calcolo vettorializzato
-        # Gram per cella: (ncells, 4, 4)
-        G = np.einsum('nik,njk->nij', vel_cell, vel_cell)
-        term1 = np.trace(G, axis1=1, axis2=2)  # (ncells,)
-        # somma della parte inferiore esclusa diag
-        term2 = np.sum(np.tril(G, k=-1), axis=(1, 2))  # (ncells,)
-
-        KE_cell_consistent = 0.5 * RHO_BLOOD * (vol / 10.0) * (term1 + term2)  # (ncells,)
-        KE_total_consistent = KE_cell_consistent.sum()
-        KE_density_consistent = KE_total_consistent / vol.sum()  # J/m^3
-
+        # # Gram per cella: (ncells, 4, 4)
+        # G = np.einsum('nik, njk->nij', vel_cell, vel_cell)
+        # term1 = np.trace(G, axis1=1, axis2=2)  # (ncells,)
+        # # somma della parte inferiore esclusa diag
+        # term2 = np.sum(np.tril(G, k=-1), axis=(1, 2))  # (ncells,)
+        #
+        # KE_cell_consistent = 0.5 * RHO_BLOOD * (vol / 10.0) * (term1 + term2)  # (ncells,)
+        # KE_total_consistent = KE_cell_consistent.sum()
+        # KE_density_consistent = KE_total_consistent / vol.sum()  # J/m^3
+        #
         # print("KE (consistente)  [J]:   ", KE_total_consistent)
         # print("KE/V (consistente)[J/m^3]:", KE_density_consistent)
 
@@ -349,18 +343,18 @@ def process_timestep(vtu_path, inlet_path, outlet_path, timestep_index):
 
         # 6️⃣ energia cinetica per nodo
         KE_node_lumped = 0.5 * m_node * speed2_node
-        KE_total_lumped = KE_node_lumped.sum()
-        KE_density_lumped = KE_total_lumped / vol.sum()
+        KE_total = KE_node_lumped.sum() * 1000.0  # J → mJ
+        KE_density = KE_total / vol.sum() # mJ/m^3
 
-        # print("KE (lumped)       [J]:   ", KE_total_lumped)
-        # print("KE/V (lumped)     [J/m^3]:", KE_density_lumped)  # J/m3 (energia per volume totale)
+        # print("KE (lumped)       [J]:   ", KE_total)
+        # print("KE/V (lumped)     [J/m^3]:", KE_density)  # J/m3 (energia per volume totale)
 
-        metrics["KE_total_consistent"] = KE_total_consistent
-        metrics["KE_density_consistent"] = KE_density_consistent
-        metrics["KE_total_lumped"] = KE_total_lumped
-        metrics["KE_density_lumped"] = KE_density_lumped
+        # metrics["KE_total_consistent"] = KE_total_consistent
+        # metrics["KE_density_consistent"] = KE_density_consistent
+        metrics["KE_total_mJ"] = KE_total
+        metrics["KE_density_mJ/m^3"] = KE_density
     else:
-        metrics.update({'KE_density_consistent': np.nan, 'KE_total_consistent': np.nan})
+        metrics.update({'KE_density_mJ/m^3': np.nan, 'KE_total_mJ': np.nan})
 
     # Vorticità (1/s)
     if 'Vorticity' in vol_mesh.point_data and FLAG_VORTICITY:
@@ -379,7 +373,7 @@ def process_timestep(vtu_path, inlet_path, outlet_path, timestep_index):
 
     # metrics['TKE_mean'] = np.mean(vol_mesh.point_data['TKE']) if 'TKE' in vol_mesh.point_data else np.nan
 
-    if not np.isnan(metrics['inlet_pressure']) and not np.isnan(metrics['outlet_pressure']):
+    if not np.isnan(metrics['inlet_pressure_mmHg']) and not np.isnan(metrics['outlet_pressure_mmHg']):
         # Copia della mesh deformata
         mesh = vol_mesh.copy()
 
@@ -426,7 +420,33 @@ def process_timestep(vtu_path, inlet_path, outlet_path, timestep_index):
         # print(f"\nViscous Energy Loss (total): {EL_total:.4e} W")
         # print(f"Mean viscous dissipation: {EL_mean:.4e} W/m³")
     else:
-        metrics['Energy_Loss_mW'] = np.nan
+        metrics['Viscous_EL_W'] = np.nan
+        metrics['Viscous_EL_mean_W/m3'] = np.nan
+
+    # HDF (Forza emodinamica)
+    if FLAG_HDF:
+        vol1 = vol_mesh.compute_derivative(scalars="Pressure", gradient=True)
+        gradP = np.array(vol1.point_data["gradient"])  # point gradP
+
+        # vol3 = vol1.point_data_to_cell_data()
+        # gradP_c_from_p = np.array(vol3.cell_data['gradient']) # cell gradP from point gradP
+        #
+        # vol2 = vol.point_data_to_cell_data()
+        # vol2 = vol2.compute_derivative(scalars='Pressure', gradient=True, preference='cell')
+        # gradP_c = np.array(vol2.cell_data['gradient']) # cell gradP from cell P
+
+        cell_vols = abs(vol_mesh.compute_cell_sizes(volume=True)["Volume"])
+        cells = vol_mesh.cells.reshape(-1, 5)[:, 1:5]  # per tetra, 4 nodi/cella
+
+        # Volume nodale = somma di 1/4 del volume di ogni cella adiacente
+        V_node = np.zeros(vol_mesh.n_points)
+        for i, nodes in enumerate(cells):
+            V_node[nodes] += cell_vols[i] / len(nodes)
+
+        F_gradP = -np.sum(gradP * V_node[:, None], axis=0)
+        metrics['HDF_N'] = F_gradP
+    else:
+        metrics['HDF_N'] = np.nan
 
     return metrics
 
@@ -437,14 +457,14 @@ def process_timestep(vtu_path, inlet_path, outlet_path, timestep_index):
 
 def find_peak_timesteps(df: pd.DataFrame) -> dict:
     """Identifica gli indici dei timestep corrispondenti a picchi di flusso."""
-    if df.empty or 'inlet_flow' not in df.columns: return {}
+    if df.empty or 'inlet_flow_mL_s' not in df.columns: return {}
 
     steps_per_cycle = len(df) // CYCLES
     last_cycle_df = df.iloc[-steps_per_cycle:]
 
     timesteps = {
-        "peak_diastole": last_cycle_df['inlet_flow'].idxmax(),
-        "peak_systole": last_cycle_df['outlet_flow'].idxmax(),
+        "peak_diastole": last_cycle_df['inlet_flow_mL_s'].idxmax(),
+        "peak_systole": last_cycle_df['outlet_flow_mL_s'].idxmax(),
     }
     print(f"Identificati timestep chiave per visualizzazioni: {timesteps}")
     return timesteps
@@ -598,8 +618,8 @@ def generate_summary_plots(df, save_path):
 
     # Pressione
     plt.figure(figsize=(10, 5))
-    plt.plot(df["time"], df["inlet_pressure"], label="Inlet Pressure", color='royalblue')
-    plt.plot(df["time"], df["outlet_pressure"], label="Outlet Pressure", color='crimson')
+    plt.plot(df["time"], df["inlet_pressure_mmHg"], label="Inlet Pressure", color='royalblue')
+    plt.plot(df["time"], df["outlet_pressure_mmHg"], label="Outlet Pressure", color='crimson')
     plt.xlabel("Time step")
     plt.ylabel("Pressione Media (mmHg)")
     plt.title("Pressione Media nel Tempo")
@@ -609,8 +629,8 @@ def generate_summary_plots(df, save_path):
 
     # Portata
     plt.figure(figsize=(10, 5))
-    plt.plot(df["time"], df["inlet_flow"], label="Inlet Flow", color='royalblue')
-    plt.plot(df["time"], df["outlet_flow"], label="Outlet Flow", color='crimson')
+    plt.plot(df["time"], df["inlet_flow_mL_s"], label="Inlet Flow", color='royalblue')
+    plt.plot(df["time"], df["outlet_flow_mL_s"], label="Outlet Flow", color='crimson')
     plt.xlabel("Time step")
     plt.ylabel("Portata (mL/s)")
     plt.title("Portata nel Tempo")
@@ -620,9 +640,9 @@ def generate_summary_plots(df, save_path):
 
     # Energia Cinetica
     plt.figure(figsize=(10, 5))
-    plt.plot(df["time"], df["KE_total_consistent"], label="Energia Cinetica Totale (J)", color='darkorange')
+    plt.plot(df["time"], df["KE_total_mJ"], label="Energia Cinetica Totale (mJ)", color='darkorange')
     plt.xlabel("Time step")
-    plt.ylabel("Energia Cinetica (J)")
+    plt.ylabel("Energia Cinetica (mJ)")
     plt.title("Energia Cinetica Totale nel Volume")
     plt.legend()
     plt.savefig(save_path / "kinetic_energy_over_time.png")
@@ -630,9 +650,9 @@ def generate_summary_plots(df, save_path):
 
     # NUOVO: Plot Perdita di Energia
     plt.figure(figsize=(10, 5))
-    plt.plot(df["time"], df["Viscous_EL_W"], label="Perdita di Energia (mW)", color='purple')
+    plt.plot(df["time"], df["Viscous_EL_W"], label="Perdita di Energia (W)", color='purple')
     plt.xlabel("Time step")
-    plt.ylabel("Perdita di Energia (mW)")
+    plt.ylabel("Perdita di Energia (W)")
     plt.title("Perdita di Energia nel Tempo")
     plt.legend()
     plt.savefig(save_path / "energy_loss_over_time.png")
@@ -661,8 +681,8 @@ def analyze_periodicity(df, cycles, save_path):
     # --- 1. Confronto tra tutti i cicli (RMSE e Correlazione) ---
     metrics = []
     variables_to_check = [
-        "inlet_pressure", "outlet_pressure", "inlet_flow", "outlet_flow",
-        "KE_total_consistent", "Vorticity_mean"
+        "inlet_pressure_mmHg", "outlet_pressure_mmHg", "inlet_flow_mL_s", "outlet_flow_mL_s",
+        "KE_total_mJ", "Vorticity_mean"
     ]
 
     for var in variables_to_check:
@@ -765,8 +785,8 @@ def export_for_graphpad(df: pd.DataFrame, save_path: Path):
 
     # Seleziona le colonne di dati da esportare
     columns_to_export = [
-        "inlet_pressure", "outlet_pressure", "inlet_flow", "outlet_flow",
-        "KE_total_consistent", "Vorticity_mean", "WSS_mean", "TKE_mean", "Energy_Loss_mW"
+        "inlet_pressure_mmHg", "outlet_pressure_mmHg", "inlet_flow_mL_s", "outlet_flow_mL_s",
+        "KE_total_mJ", "Vorticity_mean", "WSS_mean", "TKE_mean", "Energy_Loss_mW"
     ]
 
     # Riorganizza il DataFrame da "wide" a "long"
@@ -816,13 +836,13 @@ def main():
                 #     v = np.concatenate((v, pv_to_np(mesh.extract_surface())[0][:, :, np.newaxis]), axis=2)
 
 
-            V = np.array([m['Volume_mL'] for m in all_metrics])
-            Q_in = np.array([m['inlet_flow'] for m in all_metrics])
-            Q_out = np.array([m['outlet_flow'] for m in all_metrics])
-            p_in = np.array([m['inlet_pressure'] for m in all_metrics])
-            p_out = np.array([m['outlet_pressure'] for m in all_metrics])
-            KE_total_consistent = np.array([m['KE_total_consistent'] for m in all_metrics])
-            KE_density_consistent = np.array([m['KE_density_consistent'] for m in all_metrics])
+            V = np.array([m['volume_mL'] for m in all_metrics])
+            Q_in = np.array([m['inlet_flow_mL_s'] for m in all_metrics])
+            Q_out = np.array([m['outlet_flow_mL_s'] for m in all_metrics])
+            p_in = np.array([m['inlet_pressure_mmHg'] for m in all_metrics])
+            p_out = np.array([m['outlet_pressure_mmHg'] for m in all_metrics])
+            KE_total = np.array([m['KE_total_mJ'] for m in all_metrics])
+            KE_density = np.array([m['KE_density_mJ/m^3'] for m in all_metrics])
             EL_total = np.array([m['Viscous_EL_W'] for m in all_metrics])
             EL_mean = np.array([m['Viscous_EL_mean_W/m3'] for m in all_metrics])
 
@@ -848,8 +868,8 @@ def main():
             # plt.plot(time, Q_out, 's--', label='Q_out [mL/s]')
             # plt.plot(time, p_in, 'd-.', label='P_in [mmHg]')
             # plt.plot(time, p_out, 'v-.', label='P_out [mmHg]')
-            plt.plot(time, KE_total_consistent*1000, 'h-.', label='KE_total_consistent [mJ]')
-            # plt.plot(time, KE_density_consistent, '*-.', label='KE_density_consistent [J/m³]')
+            plt.plot(time, KE_total, 'h-.', label='KE_total [mJ]')
+            # plt.plot(time, KE_density_, '*-.', label='KE_density_mJ/m^3 [J/m³]')
             plt.plot(time, EL_total*1000, '+-.', label='EL_total [mW]')
             # plt.plot(time, EL_mean, 'D-.', label='EL_mean [W/m³]')
             # plt.plot(time, PL, '<-.', label='Energy Loss [mW]')
@@ -899,8 +919,8 @@ def main():
 
             # dVdt = np.gradient(V, time / 1000.0)  # mL/s
             #
-            # qin = np.array([m['inlet_flow'] for m in all_metrics])  # mL/s
-            # qout = np.array([m['outlet_flow'] for m in all_metrics])  # mL/s
+            # qin = np.array([m['inlet_flow_mL_s'] for m in all_metrics])  # mL/s
+            # qout = np.array([m['outlet_flow_mL_s'] for m in all_metrics])  # mL/s
             #
             # err_sum = np.max(np.abs(dVdt - (qin + qout)))
             # err_diff = np.max(np.abs(dVdt - (qin - qout)))
