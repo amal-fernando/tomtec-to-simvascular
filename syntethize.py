@@ -2,11 +2,18 @@ import pandas as pd
 import numpy as np
 import glob, os
 from scipy.interpolate import Akima1DInterpolator as akima
+from scipy.interpolate import PchipInterpolator as pchip
 from pathlib import Path
 from tkinter import filedialog, Tk, filedialog, simpledialog
+import matplotlib.pyplot as plt
+import matplotlib
+
+# Imposta il backend di Matplotlib
+matplotlib.use('TkAgg')
 
 # === PARAMETRI ===
-N_SAMPLES = 300           # numero di punti nel tempo normalizzato
+N_SAMPLES = 100           # numero di punti nel tempo normalizzato
+N_CYCLES =3              # numero di cicli cardiaci nella simulazione
 TIME_COL = "time"         # nome colonna tempo
 SEPARATOR = ","           # separatore CSV (prova anche ";" se necessario)
 # DECIMAL = ","             # se i numeri usano la virgola decimale
@@ -49,7 +56,7 @@ def automatic_parser():
     # --- Cerca file in ciascuna cartella paziente ---
     for patient_dir in patient_dirs:
         patient_id = patient_dir.name
-        results_dir = patient_dir / "results"
+        results_dir = patient_dir / "results_1"
 
         csv_file = results_dir / "simulation_results_summary.csv"
         txt_file = results_dir / "volume_summary.txt"
@@ -96,7 +103,7 @@ def automatic_parser():
         return [], [], 0, None
 
     # --- Crea cartella di salvataggio ---
-    save_path = root_dir / "resampled_csv"
+    save_path = root_dir / "resampled_csv_1"
     save_path.mkdir(exist_ok=True)
 
     return csv_list, txt_list, start_index, save_path
@@ -183,7 +190,7 @@ def setup_paths_and_files(file_path):
 
     path = file_path.parent
 
-    print(f"Cartella dati: {path}")
+    # print(f"Cartella dati: {path}")
 
     return {
         "subject": path.parent
@@ -192,55 +199,103 @@ def setup_paths_and_files(file_path):
 # === STRUTTURE DATI ===
 data_pre, data_post = {}, {}
 summary_pre, summary_post = {}, {}  # per i dati TXT
-t_common = np.linspace(0, 3, N_SAMPLES)
+t_common = np.linspace(0, 1, N_SAMPLES)
 
 # === RACCOGLI FILE ===
 csv_list, txt_list, start_index, save_path = automatic_parser()
 print(f"📂 Cartella salvataggio: {save_path}")
 
-# for file in csv_list[start_index:]:
-#     if not file.exists():
-#         print(f"[ERROR] File not found: {file}")
-#         continue  # Skip to the next file if the current one does not exist
-#
-#     print(f"Processing file: {file}")
-#     # Read and parse the results file
-#     paths_info = setup_paths_and_files(file)
-#     subject = os.path.splitext(os.path.basename(paths_info["subject"]))[0]
-#
-#     # determina gruppo (pre o post)
-#     if "_pre" in subject.lower():
-#         group = "pre"
-#     elif "_post" in subject.lower():
-#         group = "post"
-#     else:
-#         print(f"⚠️  File {subject} non riconosciuto come pre/post, salto.")
-#         continue
-#
-#     df = pd.read_csv(file, sep="\t|;|,", engine="python", decimal=DECIMAL)
-#     if TIME_COL not in df.columns:
-#         raise ValueError(f"La colonna '{TIME_COL}' non è nel file {file}")
-#
-#     # normalizza tempo su 0–1
-#     t = df[TIME_COL].to_numpy()
-#     t_norm = 3*((t - t.min()) / (t.max() - t.min()))
-#
-#     # per ogni variabile
-#     for col in df.columns:
-#         if col == TIME_COL:
-#             continue
-#         y = df[col].to_numpy(dtype=float)
-#         f_interp = akima(t_norm, y, method="makima", extrapolate=True)
-#         y_resamp = f_interp(t_common)
-#
-#         if group == "pre":
-#             data_dict = data_pre
-#         else:
-#             data_dict = data_post
-#
-#         if col not in data_dict:
-#             data_dict[col] = {}
-#         data_dict[col][subject] = y_resamp
+for file in csv_list[start_index:]:
+    if not file.exists():
+        print(f"[ERROR] File not found: {file}")
+        continue  # Skip to the next file if the current one does not exist
+
+    print(f"Processing file: {file}")
+    # Read and parse the results file
+    paths_info = setup_paths_and_files(file)
+    subject = os.path.splitext(os.path.basename(paths_info["subject"]))[0]
+
+    # determina gruppo (pre o post)
+    if "_pre" in subject.lower():
+        group = "pre"
+    elif "_post" in subject.lower():
+        group = "post"
+    else:
+        print(f"⚠️  File {subject} non riconosciuto come pre/post, salto.")
+        continue
+
+    df = pd.read_csv(file, sep="\t|;|,", engine="python", decimal=DECIMAL)
+
+    # Estrai il secondo ciclo cardiaco
+    n_rows = len(df)
+    rows_per_cycle = n_rows // N_CYCLES  # divisione intera
+
+    start = rows_per_cycle * 1  # inizio del secondo ciclo (indice 1)
+    end = rows_per_cycle * 2  # fine del secondo ciclo (indice 2)
+
+    df = df.iloc[start:end].reset_index(drop=True)
+
+    if TIME_COL not in df.columns:
+        raise ValueError(f"La colonna '{TIME_COL}' non è nel file {file}")
+
+    # normalizza tempo su 0–1
+    t = df[TIME_COL].to_numpy()
+    t_norm = ((t - t.min()) / (t.max() - t.min()))
+
+    # per ogni variabile
+    for col in df.columns:
+        if col == TIME_COL:
+            continue
+        if col == "HDF_N":
+            arr = np.array([np.fromstring(s.strip("[]"), sep=' ') for s in df["HDF_N"]])
+
+            components = ['x', 'y', 'z']
+            for i, comp in enumerate(components):
+                y = arr[:, i]
+                f_interp = pchip(t_norm, y, extrapolate=True)
+                y_resamp = f_interp(t_common)
+
+                if group == "pre":
+                    data_dict = data_pre
+                else:
+                    data_dict = data_post
+                if f"HDF_{comp}" not in data_dict:
+                    data_dict[f"HDF_{comp}"] = {}
+                data_dict[f"HDF_{comp}"][subject] = y_resamp
+        else:
+            y = df[col].to_numpy(dtype=float)
+
+            # f_akima = akima(t_norm, y,method='makima', extrapolate=True)
+            # y_akima = f_akima(t_common)
+            # if (y_akima.min() < y.min()) or (y_akima.max() > y.max()):
+            #     print("⚠️  L'interpolazione akima ha introdotto valori fuori range!")
+
+            f_pchip = pchip(t_norm, y, extrapolate=True)
+            y_pchip = f_pchip(t_common)
+            if (y_pchip.min() < y.min()) or (y_pchip.max() > y.max()):
+                print("⚠️  L'interpolazione pchip ha introdotto valori fuori range!")
+
+            # Crea plot di controllo (opzionale)
+
+            # plt.figure()
+            # plt.plot(t_norm, y, 'o', label='Original Data')
+            # plt.plot(t_common, y_akima, '-', label='Akima Data')
+            # plt.plot(t_common, y_pchip, '--', label='PCHIP Data')
+            # plt.xlabel('Normalized Time (T/Tmax)')
+            # plt.ylabel(col)
+            # plt.title(f'Subject: {subject} - Variable: {col}')
+            # plt.legend()
+            # plt.show()
+
+
+            if group == "pre":
+                data_dict = data_pre
+            else:
+                data_dict = data_post
+
+            if col not in data_dict:
+                data_dict[col] = {}
+            data_dict[col][subject] = y_pchip  # usa pchip
 
 # === FUNZIONE DI SALVATAGGIO ===
 def save_group(data_dict, group_name, base_folder):
@@ -252,15 +307,16 @@ def save_group(data_dict, group_name, base_folder):
         df_out.index.name = "time (T/Tmax)"
         for subj, y_resamp in subj_data.items():
             df_out[subj] = y_resamp
-        out_name = os.path.join(folder, f"{var}.csv")
+        safe_var = var.replace("/", "_")
+        out_name = os.path.join(folder, f"{safe_var}.csv")
         df_out.to_csv(out_name, sep=f"{SEPARATOR}", decimal=f"{DECIMAL}")
         print(f"✅ Salvato: {out_name}")
 
 # === SALVA I DUE GRUPPI ===
-# if data_pre:
-#     save_group(data_pre, "pre", save_path)
-# if data_post:
-#     save_group(data_post, "post", save_path)
+if data_pre:
+    save_group(data_pre, "pre", save_path)
+if data_post:
+    save_group(data_post, "post", save_path)
 
 # --- PROCESSA FILE TXT ---
 for file in txt_list[start_index:]:

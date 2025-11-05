@@ -183,7 +183,7 @@ def setup_paths_and_files(vtu_file_path):
 
     path = vtu_file_path.parent
     boundary_result_path = path / "boundary_simulation"
-    save_path = path.parent / "results"
+    save_path = path.parent / "results_1"
     save_path.mkdir(exist_ok=True)
 
     print(f"Cartella dati: {path}")
@@ -245,6 +245,31 @@ def compute_flow_rate(surface: pv.PolyData):
 
     return Q_mm3_s / 1000.0  # mm^3/s -> mL/s
 
+def compute_average_pressure(surf: pv.PolyData):
+    # assicuriamoci di avere soli triangoli
+    p = surf.point_data["Pressure"]
+
+    # Calcola area di ogni triangolo
+    surf = surf.compute_cell_sizes(area=True)
+    A_cells = surf.cell_data["Area"]  # (n_cells,)
+
+    # Connettività (n_tri, 3)
+    faces = surf.faces.reshape(-1, 4)[:, 1:4]
+
+    w = np.zeros(surf.n_points)
+
+    # 🔁 Ciclo su ogni triangolo: aggiungi 1/3 dell'area ai nodi coinvolti
+    for ci, nodes in enumerate(faces):
+        area_i = A_cells[ci]
+        for node in nodes:
+            w[node] += area_i / 3.0
+
+    # Media pesata: somma(p_i * w_i) / somma(w_i)
+    np.sum(w)
+    np.sum(A_cells)
+    p_mean = np.sum(p * w) / np.sum(w)
+    return p_mean
+
 
 def process_timestep(vtu_path, inlet_path, outlet_path, timestep_index):
     """
@@ -265,8 +290,8 @@ def process_timestep(vtu_path, inlet_path, outlet_path, timestep_index):
 
     # Pressione (Pa -> mmHg)
     if FLAG_PRESSURE:
-        metrics['inlet_pressure_mmHg'] = np.mean(inlet_surf.point_data["Pressure"]) / PA_TO_MMHG if "Pressure" in inlet_surf.point_data else np.nan
-        metrics['outlet_pressure_mmHg'] = np.mean(outlet_surf.point_data["Pressure"]) / PA_TO_MMHG if "Pressure" in outlet_surf.point_data else np.nan
+        metrics['inlet_pressure_mmHg'] = compute_average_pressure(inlet_surf) / PA_TO_MMHG if "Pressure" in inlet_surf.point_data else np.nan
+        metrics['outlet_pressure_mmHg'] = compute_average_pressure(outlet_surf) / PA_TO_MMHG if "Pressure" in outlet_surf.point_data else np.nan
     else:
         metrics['inlet_pressure_mmHg'] = np.nan
         metrics['outlet_pressure_mmHg'] = np.nan
@@ -284,7 +309,24 @@ def process_timestep(vtu_path, inlet_path, outlet_path, timestep_index):
     vol_mesh.points = vol_mesh.points + vol_mesh.point_data["Displacement"]
 
     if FLAG_PRESSURE:
-        metrics['volume_pressure_mmHg'] = np.mean(vol_mesh.point_data["Pressure"]) / PA_TO_MMHG if "Pressure" in vol_mesh.point_data else np.nan
+        p = vol_mesh.point_data["Pressure"]
+        mesh = vol_mesh.compute_cell_sizes(volume=True)
+        V_cells = abs(mesh.cell_data["Volume"])  # (n_cells,)
+        # Connettività dei tetraedri (n_cells, 4)
+        cells = mesh.cells.reshape(-1, 5)[:, 1:5]
+
+        n_points = mesh.n_points
+        w = np.zeros(n_points)
+
+        # 🔁 Ciclo: assegna 1/4 del volume di ogni cella ai 4 nodi
+        for ci, nodes in enumerate(cells):
+            V = V_cells[ci]
+            for node in nodes:
+                w[node] += V / 4.0
+
+        # Media pesata per volume
+        p_mean = np.sum(p * w) / np.sum(w)
+        metrics['volume_pressure_mmHg'] = p_mean / PA_TO_MMHG if "Pressure" in vol_mesh.point_data else np.nan
 
     # surf = vol_mesh.extract_surface()
     # surf = surf.compute_normals(point_normals=True, cell_normals=False)
